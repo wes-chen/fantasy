@@ -270,12 +270,17 @@ def main():
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
         gap = abs(mine["val"] - theirs["val"]) / max(
             mine["val"], theirs["val"], 1)
+        delta, sits, starts = swap_delta(mine, theirs)
         tag = " [CREATES YOUR %s HOLE]" % mine["pos"] if hole else ""
         thin = " (thins %s)" % ("you" if mflag else "them") if mflag or tflag else ""
-        return (gap, f"  you send {mine['name']} ({mine['val']}){_btag(mine)}"
-                     f" -> {partner}; "
-                     f"you get {theirs['name']} ({theirs['val']}){_btag(theirs)} "
-                     f"[gap {gap:.0%}]{thin}{tag}")
+        fit = ""
+        if starts:
+            fit = ("; " + ", ".join(starts) + " starts" +
+                   (", " + ", ".join(sits) + " sits" if sits else ""))
+        return (delta, f"  you send {mine['name']} ({mine['val']}){_btag(mine)}"
+                       f" -> {partner}; "
+                       f"you get {theirs['name']} ({theirs['val']}){_btag(theirs)} "
+                       f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}]{thin}{tag}")
 
     print("=== TEAM NEEDS (startable vs effective slots) ===")
     print(f"  effective slots: {eff_slots} (+{flex_slots} flex) | "
@@ -349,9 +354,45 @@ def main():
     print()
     # candidate 1-for-1s: your surplus -> their need, their surplus -> your need
     print("=== CANDIDATE SWAPS (sorted by value gap) ===")
+    print("  ranked by projected lineup-points delta for you; value gap shown "
+          "for fairness; incoming must crack your projected starting lineup")
     my_need = need_score(me)
     my_tradable = tradable(me)
+
+    def lineup_ids(bypos):
+        """Your projected starting lineup, by FantasyCalc redraft value:
+        fill base slots first, then flex slots with the best remaining
+        RB/WR/TE (superflex is covered by the 2 QB base slots)."""
+        used, starters = set(), []
+        for pos in ("QB", "RB", "WR", "TE"):
+            for x in sorted(bypos.get(pos, []),
+                            key=lambda x: -x["val"])[:eff_slots[pos]]:
+                used.add(x["id"])
+                starters.append(x)
+        pool = [x for pos in ("RB", "WR", "TE") for x in bypos.get(pos, [])
+                if x["id"] not in used]
+        pool.sort(key=lambda x: -x["val"])
+        return starters + pool[:flex_slots]
+
+    my_lineup = lineup_ids(me["bypos"])
+    my_lineup_val = sum(x["val"] for x in my_lineup)
+    my_lineup_ids = {x["id"] for x in my_lineup}
+
+    def swap_delta(mine, theirs):
+        """Lineup-points delta of the swap for you: who starts, who sits."""
+        new_bypos = {p: [x for x in lst if x["id"] != mine["id"]]
+                     for p, lst in me["bypos"].items()}
+        new_bypos.setdefault(theirs["pos"], []).append(dict(theirs))
+        new_lineup = lineup_ids(new_bypos)
+        new_ids = {x["id"] for x in new_lineup}
+        delta = sum(x["val"] for x in new_lineup) - my_lineup_val
+        sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
+        starts = [x["name"] for x in new_lineup
+                  if x["id"] not in my_lineup_ids]
+        return delta, sits, starts
+
     rows = []
+    dropped = 0
     for rid, st in teams.items():
         if rid == my_rid:
             continue
@@ -362,11 +403,20 @@ def main():
             for theirs, tflag in tradable(st):
                 if my_need.get(theirs["pos"], 0) <= 0:
                     continue  # you don't need it
+                delta = swap_delta(mine, theirs)[0]
+                if delta <= 0:
+                    # P5 fit veto: incoming can't crack his starting
+                    # lineup, so equal calc value buys zero lineup gain.
+                    dropped += 1
+                    continue
                 rows.append(show_swap(mine, mflag, theirs, tflag, st["name"]))
-    for _, line in sorted(rows)[:12]:
+    for _, line in sorted(rows, reverse=True)[:12]:
         print(line)
     if not rows:
         print("  (no clean 1-for-1 fits)")
+    if dropped:
+        print(f"  ({dropped} lateral swap(s) dropped: incoming player "
+              f"couldn't crack your projected starting lineup)")
     print()
     print("=== HOLE-CREATING OPTIONS (persona must price the roster cost) ===")
     for mine, mp in hole_creating(me):
