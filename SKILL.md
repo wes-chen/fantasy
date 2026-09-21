@@ -21,8 +21,12 @@ effective starting slots, Wesley's roster by value (with FantasyPros bye
 weeks), a bye-week audit that flags clusters (3+ on the same bye — avoid
 adding more), a value-divergence section (FantasyPros rest-of-season ECR
 rank vs FantasyCalc rank; |diff| >= 12 spots flagged as hold/buy-low or
-sell-high), candidate swaps sorted by value gap (annotated with bye weeks
-and bye-stack warnings), hole-creating options it refuses to price on its
+sell-high), candidate swaps ranked by projected lineup-points delta for
+him (the marginal gain to *his* optimal starting lineup by FantasyCalc
+redraft value, not the smallest value gap — annotated with the value gap
+for fairness, bye weeks and bye-stack warnings, and exactly who starts
+and who sits after the deal; lateral swaps where the incoming player
+can't crack his projected starting lineup are dropped outright), hole-creating options it refuses to price on its
 own, and a waiver-wire section (top free agents by position on FantasyCalc
 redraft value, trending adds, and add/drop suggestions vs his droppable
 bench). The header also prints the season clock: current NFL week, weeks
@@ -115,6 +119,12 @@ to the trade deadline, and the posture below.
    start. Label every proposal **RENTAL** (pays off in the next 2-3
    weeks) or **KEEPER** (rest-of-season/playoff value) so the horizon
    is explicit. After the deadline: waivers only, no trade proposals.
+9. **Fit-asymmetry veto.** The engine only shows swaps where the incoming
+   player cracks his projected starting lineup, and each row names who
+   starts and who sits. Equal FantasyCalc value ≠ equal lineup value: a
+   5000-value WR is his WR5 (~0 starts) but the other manager's WR2. Never
+   bless a "fair" deal that improves only their side's fit — rank every
+   proposal by what it adds to *his* lineup, and say the number.
 
 ## Output contract
 
