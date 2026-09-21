@@ -16,12 +16,17 @@ weekend warriors `1379714328738955264` (4-team, 1-QB, half-PPR).
 Sleeper IDs, endpoints, and the FantasyCalc valuation API are documented in
 `references/api_notes.md`. Players DB cache: `~/workspace/sleeper/players.json`.
 
-The engine prints five things: league trade history (market comps),
-team needs vs effective starting slots, Wesley's roster by value,
-candidate swaps sorted by value gap, hole-creating options it refuses
-to price on its own, and a waiver-wire section (top free agents by
-position on FantasyCalc value, trending adds, and add/drop suggestions
-vs his droppable bench).
+The engine prints: league trade history (market comps), team needs vs
+effective starting slots, Wesley's roster by value (with FantasyPros bye
+weeks), a bye-week audit that flags clusters (3+ on the same bye — avoid
+adding more), a value-divergence section (FantasyPros rest-of-season ECR
+rank vs FantasyCalc rank; |diff| >= 12 spots flagged as hold/buy-low or
+sell-high), candidate swaps sorted by value gap (annotated with bye weeks
+and bye-stack warnings), hole-creating options it refuses to price on its
+own, and a waiver-wire section (top free agents by position on FantasyCalc
+redraft value, trending adds, and add/drop suggestions vs his droppable
+bench). The header also prints the season clock: current NFL week, weeks
+to the trade deadline, and the posture below.
 
 ## Judgment layers (what makes this better than a trade calculator)
 
@@ -99,6 +104,17 @@ vs his droppable bench).
      be decisive (roughly 40%+) or the current starter unstartable.
      A bird in hand — this is the same instinct as holding Loveland
      over Otton, applied in reverse.
+8. **Season clock — short-term vs long-term balance.** The engine prints a
+   posture from the current NFL week and the Week 11 trade deadline.
+   Early (W1-4): optimize for talent and role, not last week's points —
+   slow starters with elite roles are buy-lows, and never rent a
+   one-week wonder. Mid (W5-8): balanced — fill real starting-lineup
+   needs and start weighing playoff-week (W15-17) value in every deal.
+   Deadline run (W9-11): win-now — maximize rest-of-season plus playoff
+   points, pay up for certainty, and stop acquiring stashes you can't
+   start. Label every proposal **RENTAL** (pays off in the next 2-3
+   weeks) or **KEEPER** (rest-of-season/playoff value) so the horizon
+   is explicit. After the deadline: waivers only, no trade proposals.
 
 ## Output contract
 
