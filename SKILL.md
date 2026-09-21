@@ -16,10 +16,12 @@ weekend warriors `1379714328738955264` (4-team, 1-QB, half-PPR).
 Sleeper IDs, endpoints, and the FantasyCalc valuation API are documented in
 `references/api_notes.md`. Players DB cache: `~/workspace/sleeper/players.json`.
 
-The engine prints four things: league trade history (market comps),
-team needs vs effective starting slots, Wesley's roster by value, and
-candidate swaps sorted by value gap — plus hole-creating options it refuses
-to price on its own.
+The engine prints five things: league trade history (market comps),
+team needs vs effective starting slots, Wesley's roster by value,
+candidate swaps sorted by value gap, hole-creating options it refuses
+to price on its own, and a waiver-wire section (top free agents by
+position on FantasyCalc value, trending adds, and add/drop suggestions
+vs his droppable bench).
 
 ## Judgment layers (what makes this better than a trade calculator)
 
@@ -47,6 +49,23 @@ to price on its own.
    recommending: his untouchables, his pending waiver claims (never propose
    trading a player he doesn't have yet), his stated preferences
    (e.g. holding Loveland for upside), and the trade deadline (Week 11).
+6. **League-size strategy.** snapusa (14-team Superflex) and weekend
+   warriors (4-team 1-QB) are different sports:
+   - 14-team: the wire is a desert. Trades are the only real improvement
+     path. Depth is currency — never drop a startable asset for a flyer.
+     QB scarcity is extreme: his QB3 is worth more than his WR5.
+   - 4-team: the wire is an ocean. Replacement level is roughly the top
+     60 players; bench spots past ~8 have near-zero value. The strategy
+     is consolidation: 2-for-1s turning two starters into one elite,
+     stars over depth. Stream QB/TE/K/DEF freely, drop without
+     sentiment, and never pay real trade value for depth — the wire
+     gives it away.
+7. **Waiver wire is part of every recommendation.** Check the engine's
+   waiver section before proposing a trade: if a free agent is within
+   ~80% of a trade target's value at a thin position, say so — the wire
+   may make the trade unnecessary (especially 4-team). In 14-team,
+   treat a suggested add as real only if the player is startable at a
+   position where Wesley is thin.
 
 ## Output contract
 
