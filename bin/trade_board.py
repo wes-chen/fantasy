@@ -228,6 +228,79 @@ def main():
                   f"trading him leaves you with "
                   f"{me['startable'].get(mp, 0) - 1} startable {mp}")
     print()
+    # --- waiver wire ---
+    # Free agents ranked by settings-matched FantasyCalc value, because the
+    # wire is a different game by league size: an ocean in 4-team leagues
+    # (replacement level is high, stream freely) and a desert in 14-team
+    # leagues (only startable FAs at thin positions matter).
+    print("=== WAIVER WIRE ===")
+    if num_teams <= 6:
+        print("  small league: wire is rich — stream QB/TE/K/DEF, drop freely, "
+              "never pay trade value for depth")
+    else:
+        print("  deep league: wire is thin — only startable FAs at thin "
+              "positions matter; never drop a startable asset")
+    rostered = set()
+    for r in rosters:
+        for pid in (r.get("players") or []) + (r.get("reserve") or []):
+            rostered.add(str(pid))
+    WPOS = ("QB", "RB", "WR", "TE")
+    fa_by_pos = {}
+    for pid, p in players.items():
+        if not isinstance(p, dict):
+            continue
+        pos = p.get("position")
+        if pos not in WPOS or not p.get("active"):
+            continue
+        if str(pid) in rostered:
+            continue
+        v = fval.get(str(pid), (0, 999, 999))[0]
+        fa_by_pos.setdefault(pos, []).append(
+            (v, p.get("full_name") or str(pid)))
+    for pos in WPOS:
+        fa_by_pos.setdefault(pos, []).sort(reverse=True)
+        top = ", ".join(f"{n}({v})" for v, n in fa_by_pos[pos][:4])
+        print(f"  top FA {pos}: {top or '(none)'}")
+    try:
+        trending = get(f"{SLEEPER}/players/nfl/trending/add"
+                       "?lookback_hours=24&limit=25")
+    except Exception:
+        trending = []
+    tfa = []
+    for t in trending:
+        pid = str(t.get("player_id"))
+        if pid in rostered:
+            continue
+        p = players.get(pid, {})
+        if p.get("position") not in WPOS:
+            continue
+        v = fval.get(pid, (0, 999, 999))[0]
+        tfa.append(f"{p.get('full_name') or pid}({v},+{t.get('count')})")
+    print(f"  trending FA adds (24h): {', '.join(tfa) or '(none)'}")
+    bench = []
+    for p in eff_slots:
+        bench.extend(me["bypos"].get(p, [])[eff_slots[p]:])
+    bench.sort(key=lambda x: x["val"])
+    sug = []
+    for pos in WPOS:
+        if not fa_by_pos.get(pos):
+            continue
+        fav, fan = fa_by_pos[pos][0]
+        if fav <= 0:
+            continue
+        for b in bench:
+            if fav > b["val"] * 1.1:
+                sug.append((fav - b["val"],
+                            f"  ADD {fan} ({pos},{fav}) / "
+                            f"DROP {b['name']} ({b['pos']},{b['val']})"))
+                break
+    sug.sort(reverse=True)
+    print("  suggested moves:")
+    for _, line in sug[:5]:
+        print(line)
+    if not sug:
+        print("  (no FA beats your droppable bench)")
+    print()
     print("(Persona applies judgment on top: roster-context vetoes, "
           "both-sides motivation, market comps above.)")
     for rid, st in teams.items():
