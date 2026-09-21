@@ -2,15 +2,17 @@
 """Fantasy trade board: league-wide needs/surplus + candidate deals.
 
 Pulls live Sleeper rosters, FantasyCalc redraft values (settings-matched:
-superflex/QB count, team count, PPR), and the league's completed trade
-history as market comps. Prints a readable board; the analyst (persona)
-turns it into recommendations.
+superflex/QB count, team count, PPR), FantasyPros rest-of-season ECR +
+bye weeks (independent cross-check, scraped from their rankings page),
+the season clock (NFL week vs trade deadline -> posture), and the league's
+completed trade history as market comps. Prints a readable board; the
+analyst (persona) turns it into recommendations.
 
 Usage:
   trade_board.py --league <league_id> --me <user_id>
                  [--players-cache ~/workspace/sleeper/players.json]
 """
-import argparse, json, os, sys, urllib.request
+import argparse, json, os, re, sys, urllib.request
 
 SLEEPER = "https://api.sleeper.app/v1"
 FC = "https://api.fantasycalc.com/values/current"
@@ -18,6 +20,51 @@ FC = "https://api.fantasycalc.com/values/current"
 def get(url):
     req = urllib.request.Request(url, headers={"User-Agent": "trade-board/1.0"})
     return json.load(urllib.request.urlopen(req, timeout=30))
+
+def norm_name(n):
+    n = (n or "").lower().replace(".", "").replace("'", "").replace("-", " ")
+    n = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+def get_fp_ecr(players, ppr):
+    """FantasyPros rest-of-season ECR + bye weeks.
+
+    Scraped from the rankings page (embeds `var ecrData`; no auth).
+    Returns (fp, fp_week): fp maps sleeper_id -> (bye_week, ecr_rank, tier).
+    Raises on fetch/parse failure; caller falls back to empty.
+    """
+    scoring = "ppr" if ppr >= 1.0 else "half"
+    url = (f"https://www.fantasypros.com/nfl/rankings/"
+           f"{scoring}-ppr-cheatsheets.php")
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/126.0 Safari/537.36")})
+    html = urllib.request.urlopen(req, timeout=30).read().decode(
+        "utf-8", "replace")
+    m = re.search(r"var ecrData = (\{.*?\});\s*\n", html, re.S)
+    d = json.loads(m.group(1))
+    name2sid = {}
+    def _key(p):
+        # prefer active, fantasy-relevant players on name collisions
+        return (0 if p.get("active") else 1, p.get("search_rank") or 9999999)
+    for pid, p in players.items():
+        if isinstance(p, dict) and p.get("full_name"):
+            k = norm_name(p["full_name"])
+            cur = name2sid.get(k)
+            if cur is None or _key(p) < _key(players[cur]):
+                name2sid[k] = str(pid)
+    fp = {}
+    for pl in d.get("players") or []:
+        sid = name2sid.get(norm_name(pl.get("player_name")))
+        if not sid:
+            continue
+        try:
+            bye = int(pl.get("player_bye_week") or 0) or None
+        except (TypeError, ValueError):
+            bye = None
+        fp[sid] = (bye, pl.get("rank_ecr"), pl.get("tier"))
+    return fp, d.get("week")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -35,7 +82,9 @@ def main():
     num_teams = len(rosters)
     rp = league.get("roster_positions") or []
     is_sf = "SUPER_FLEX" in rp
-    ppr = float((league.get("scoring_settings") or {}).get("rec", 1.0))
+    _ss = league.get("scoring_settings") or {}
+    _st = league.get("settings") or {}
+    ppr = float(_ss["rec"] if "rec" in _ss else _st.get("rec", 1.0))
     num_qbs = 2 if is_sf else 1
 
     # FantasyCalc values matched to league settings
@@ -45,8 +94,34 @@ def main():
         p = e.get("player") or {}
         sid = str(p.get("sleeperId") or "")
         if sid:
-            fval[sid] = (e.get("value") or 0, e.get("positionRank") or 999,
+            fval[sid] = (e.get("redraftValue") or e.get("value") or 0,
+                         e.get("positionRank") or 999,
                          e.get("overallRank") or 999, e.get("trend30Day") or 0)
+
+    # --- season clock: current NFL week + trade deadline -> posture ---
+    try:
+        nfl_week = int((get(f"{SLEEPER}/state/nfl") or {}).get("week") or 1)
+    except Exception:
+        nfl_week = 1
+    trade_dl = (league.get("settings") or {}).get("trade_deadline") or 11
+    if nfl_week > trade_dl:
+        posture = "DEADLINE PASSED: waivers only"
+    elif nfl_week >= 9:
+        posture = ("WIN NOW: maximize rest-of-season + playoff points; "
+                   "pay up for certainty; label every deal RENTAL vs KEEPER")
+    elif nfl_week >= 5:
+        posture = ("BALANCED: fill real starting-lineup needs; start weighing "
+                   "playoff-week (W15-17) value in every deal")
+    else:
+        posture = ("ACQUIRE TALENT: buy roles and talent, not last week's points; "
+                   "slow starters with elite roles are buy-lows; "
+                   "never rent a one-week wonder")
+
+    # --- FantasyPros rest-of-season ECR + bye weeks (independent cross-check) ---
+    try:
+        fp, fp_week = get_fp_ecr(players, ppr)
+    except Exception:
+        fp, fp_week = {}, None
 
     def ftrend(sid):
         return fval.get(str(sid), (0, 999, 999, 0))[3]
@@ -110,6 +185,13 @@ def main():
           f"{'Superflex' if is_sf else '1-QB'} | PPR {ppr}")
     print(f"FantasyCalc baseline: redraft, numQbs={num_qbs}, "
           f"numTeams={num_teams}, ppr={ppr}")
+    print(f"NFL Week {nfl_week} | trade deadline Week {trade_dl} "
+          f"({max(trade_dl - nfl_week, 0)} wks left) | posture: {posture}")
+    if fp:
+        print(f"FantasyPros rest-of-season ECR (week {fp_week}, "
+              f"{len(fp)} players matched)")
+    else:
+        print("FantasyPros ECR unavailable this run (bye/divergence skipped)")
     print()
     print("=== LEAGUE TRADE HISTORY (market comps) ===")
     ntrades = 0
@@ -176,13 +258,23 @@ def main():
                 out.append((pls[-1], p))
         return out
 
+    my_bye_counts = {}  # filled by the bye audit before swaps print
+
+    def _btag(x):
+        b = fp.get(x["id"], (None, None, None))[0]
+        if not b:
+            return ""
+        stack = (" [BYE-STACK W%d]" % b) if my_bye_counts.get(b, 0) >= 2 else ""
+        return f"[bye {b}]{stack}"
+
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
         gap = abs(mine["val"] - theirs["val"]) / max(
             mine["val"], theirs["val"], 1)
         tag = " [CREATES YOUR %s HOLE]" % mine["pos"] if hole else ""
         thin = " (thins %s)" % ("you" if mflag else "them") if mflag or tflag else ""
-        return (gap, f"  you send {mine['name']} ({mine['val']}) -> {partner}; "
-                     f"you get {theirs['name']} ({theirs['val']}) "
+        return (gap, f"  you send {mine['name']} ({mine['val']}){_btag(mine)}"
+                     f" -> {partner}; "
+                     f"you get {theirs['name']} ({theirs['val']}){_btag(theirs)} "
                      f"[gap {gap:.0%}]{thin}{tag}")
 
     print("=== TEAM NEEDS (startable vs effective slots) ===")
@@ -208,11 +300,53 @@ def main():
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
-            f"{x['name']}({x['val']})" for x in pls))
+            f"{x['name']}({x['val']}){_btag(x)}" for x in pls))
     if me["ir"]:
         print(f"  IR: {', '.join(me['ir'])}")
     print()
 
+    print("=== BYE WEEK AUDIT (FantasyPros) ===")
+    if fp:
+        bye_groups = {}
+        for p in eff_slots:
+            for x in me["bypos"].get(p, []):
+                b = fp.get(x["id"], (None, None, None))[0]
+                if b:
+                    bye_groups.setdefault(b, []).append(x["name"])
+        my_bye_counts = {b: len(v) for b, v in bye_groups.items()}
+        for b in sorted(bye_groups):
+            names = bye_groups[b]
+            flag = "  <-- CLUSTER (avoid adding more)" if len(names) >= 3 else ""
+            print(f"  Week {b}: {', '.join(names)}{flag}")
+        if not bye_groups:
+            print("  (no bye data matched)")
+    else:
+        print("  (skipped: no FantasyPros data)")
+    print()
+    print("=== VALUE DIVERGENCE (FantasyPros ECR rank vs FantasyCalc rank) ===")
+    if fp:
+        divs = []
+        for p in eff_slots:
+            for x in me["bypos"].get(p, []):
+                _, ecr, _ = fp.get(x["id"], (None, None, None))
+                fcovr = fval.get(x["id"], (0, 999, 999, 0))[2]
+                if not ecr or fcovr >= 999:
+                    continue
+                d = fcovr - ecr
+                if abs(d) >= 12:
+                    lbl = ("ECR HIGHER (calc undervalues: hold / buy-low window)"
+                           if d >= 12 else
+                           "CALC HIGHER (sell-high candidate)")
+                    divs.append((abs(d),
+                                 f"  {x['name']}: ECR {ecr} vs FC #{fcovr}"
+                                 f" -> {lbl}"))
+        for _, line in sorted(divs, reverse=True)[:10]:
+            print(line)
+        if not divs:
+            print("  (no major divergences on your roster)")
+    else:
+        print("  (skipped: no FantasyPros data)")
+    print()
     # candidate 1-for-1s: your surplus -> their need, their surplus -> your need
     print("=== CANDIDATE SWAPS (sorted by value gap) ===")
     my_need = need_score(me)
@@ -279,7 +413,8 @@ def main():
     for pos in WPOS:
         fa_by_pos.setdefault(pos, []).sort(reverse=True)
         top = ", ".join(
-            f"{n}({fstr(pid_s, v)})" + (f"[!{inj}]" if inj else "")
+            f"{n}({fstr(pid_s, v)}){_btag({'id': pid_s})}"
+            + (f"[!{inj}]" if inj else "")
             for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
     try:
