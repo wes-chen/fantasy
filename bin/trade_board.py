@@ -40,13 +40,20 @@ def main():
 
     # FantasyCalc values matched to league settings
     fc = get(f"{FC}?isDynasty=false&numQbs={num_qbs}&numTeams={num_teams}&ppr={ppr}")
-    fval = {}  # sleeper_id -> (value, positionRank, overallRank)
+    fval = {}  # sleeper_id -> (value, positionRank, overallRank, trend30Day)
     for e in fc:
         p = e.get("player") or {}
         sid = str(p.get("sleeperId") or "")
         if sid:
             fval[sid] = (e.get("value") or 0, e.get("positionRank") or 999,
-                         e.get("overallRank") or 999)
+                         e.get("overallRank") or 999, e.get("trend30Day") or 0)
+
+    def ftrend(sid):
+        return fval.get(str(sid), (0, 999, 999, 0))[3]
+
+    def fstr(sid, val):
+        t = ftrend(sid)
+        return f"{val}({t:+.0f}/30d)" if t else f"{val}"
 
     uname = {u["user_id"]: u.get("display_name", "?") for u in users}
     rid2name = {r["roster_id"]: uname.get(r["owner_id"], "?") for r in rosters}
@@ -78,7 +85,7 @@ def main():
         plist = []
         for pid in (r.get("players") or []):
             pos = ppos(pid)
-            v, pr, ovr = fval.get(str(pid), (0, 999, 999))
+            v, pr, ovr, _ = fval.get(str(pid), (0, 999, 999, 0))
             plist.append({"id": str(pid), "name": pname(pid), "pos": pos,
                           "val": v, "prank": pr})
         bypos = {}
@@ -88,9 +95,15 @@ def main():
             v.sort(key=lambda x: -x["val"])
         startable = {p: sum(1 for pl in bypos.get(p, [])
                             if pl["prank"] <= cutoff[p]) for p in cutoff}
+        rs = r.get("settings") or {}
+        pf = (rs.get("fpts") or 0) + (rs.get("fpts_decimal") or 0) / 100
+        poss = (rs.get("ppts") or 0) + (rs.get("ppts_decimal") or 0) / 100
         teams[rid] = {"name": rid2name[rid], "bypos": bypos,
                       "startable": startable,
-                      "ir": [pname(x) for x in (r.get("reserve") or [])]}
+                      "ir": [pname(x) for x in (r.get("reserve") or [])],
+                      "record": (rs.get("wins") or 0, rs.get("losses") or 0,
+                                 rs.get("ties") or 0),
+                      "pf": pf, "poss": poss}
 
     # --- trade history (market comps) ---
     print(f"LEAGUE: {league.get('name')} | {num_teams} teams | "
@@ -182,7 +195,10 @@ def main():
         tag = "  <-- YOU" if rid == my_rid else ""
         line = ", ".join(f"{p}:{st['startable'].get(p,0)}"
                          f"({'!' if ns[p] > 0 else ''})" for p in eff_slots)
-        print(f"  {st['name']}: {line}{tag}")
+        w, l, t = st["record"]
+        print(f"  {st['name']}: {line} | {w}-{l}"
+              + (f"-{t}" if t else "") +
+              f" PF {st['pf']:.0f} poss {st['poss']:.0f}{tag}")
     print("  (!) = thin: no startable depth behind the starters")
     print()
 
@@ -245,6 +261,7 @@ def main():
         for pid in (r.get("players") or []) + (r.get("reserve") or []):
             rostered.add(str(pid))
     WPOS = ("QB", "RB", "WR", "TE")
+    HURT = ("Out", "IR", "Doubtful", "Suspended")  # never suggest adding
     fa_by_pos = {}
     for pid, p in players.items():
         if not isinstance(p, dict):
@@ -254,12 +271,16 @@ def main():
             continue
         if str(pid) in rostered:
             continue
-        v = fval.get(str(pid), (0, 999, 999))[0]
+        pid_s = str(pid)
+        v = fval.get(pid_s, (0, 999, 999, 0))[0]
+        inj = p.get("injury_status") or ""
         fa_by_pos.setdefault(pos, []).append(
-            (v, p.get("full_name") or str(pid)))
+            (v, p.get("full_name") or pid_s, inj, pid_s))
     for pos in WPOS:
         fa_by_pos.setdefault(pos, []).sort(reverse=True)
-        top = ", ".join(f"{n}({v})" for v, n in fa_by_pos[pos][:4])
+        top = ", ".join(
+            f"{n}({fstr(pid_s, v)})" + (f"[!{inj}]" if inj else "")
+            for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
     try:
         trending = get(f"{SLEEPER}/players/nfl/trending/add"
@@ -274,8 +295,10 @@ def main():
         p = players.get(pid, {})
         if p.get("position") not in WPOS:
             continue
-        v = fval.get(pid, (0, 999, 999))[0]
-        tfa.append(f"{p.get('full_name') or pid}({v},+{t.get('count')})")
+        v = fval.get(pid, (0, 999, 999, 0))[0]
+        inj = p.get("injury_status") or ""
+        tfa.append(f"{p.get('full_name') or pid}({fstr(pid, v)},+{t.get('count')})"
+                   + (f"[!{inj}]" if inj in HURT else ""))
     print(f"  trending FA adds (24h): {', '.join(tfa) or '(none)'}")
     bench = []
     for p in eff_slots:
@@ -285,13 +308,13 @@ def main():
     for pos in WPOS:
         if not fa_by_pos.get(pos):
             continue
-        fav, fan = fa_by_pos[pos][0]
-        if fav <= 0:
-            continue
+        fav, fan, fainj, fapid = fa_by_pos[pos][0]
+        if fav <= 0 or fainj in HURT:
+            continue  # never suggest adding an injured player
         for b in bench:
             if fav > b["val"] * 1.1:
                 sug.append((fav - b["val"],
-                            f"  ADD {fan} ({pos},{fav}) / "
+                            f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
                             f"DROP {b['name']} ({b['pos']},{b['val']})"))
                 break
     sug.sort(reverse=True)
