@@ -33,9 +33,23 @@ vs his droppable bench).
    his replacement plan is. A "fair" trade that creates a hole is a bad
    trade unless the return is a difference-maker.
 2. **Both-sides motivation.** Every proposal must state why the *partner*
-   says yes: their positional need, their unstartable surplus, their record
-   (0-2 teams panic; 3-0 teams don't), and their roster construction.
-   A trade the other side would never accept is not a recommendation.
+   says yes: their positional need, their unstartable surplus, and their
+   roster construction. A trade the other side would never accept is not
+   a recommendation.
+3. **Team-building read.** Before proposing anything, read each team's
+   situation off the engine's record + possible-points line:
+   - A losing record with low possible points is a bad roster, not bad
+     luck — that manager should be the most open to a shake-up, but has
+     the least to offer.
+   - A losing record with HIGH possible points is snakebitten — they'll
+     believe they're better than their record and won't sell at a
+     discount. Don't bother with lowball timing plays.
+   - An undefeated team doesn't make moves unless the deal is clearly
+     safe for them; they pay for certainty, not upside.
+   - Fit the proposal to the partner's situation, not just their depth
+     chart: the desperate team wants proven starters, the cruising team
+     wants no risk, the snakebitten team wants respect for their
+     roster's talent.
 3. **League market comps over national charts.** The league's own completed
    trades set the real market — e.g. Bryce Young fetched Rome Odunze here,
    which proves the Superflex QB premium is live in this specific league.
@@ -45,6 +59,15 @@ vs his droppable bench).
    teams overpay), quality-over-count (one elite beats two flexes in
    14-teamers), age curves in redraft (33-year-old producers are sells),
    and job-security risk (backup QBs behind drafted rookies).
+   **Freshness check.** FantasyCalc updates daily and is blind to today's
+   news — a value can be stale the morning after an injury or a benching.
+   The engine prints each player's 30-day value trend next to the number:
+   read it as a freshness signal. A high value with a flat trend and an
+   injury flag is stale, not a find (Caleb Williams sat at 2713 with a
+   -1 trend while listed Out — the calc simply hadn't repriced him).
+   A cratering trend means the market is already moving away; a surging
+   trend means you're chasing. Cross-check every number against the
+   injury flags and the 24-hour trending-adds line before acting on it.
 5. **Wesley's context.** Check MEMORY.md and the league's goal file before
    recommending: his untouchables, his pending waiver claims (never propose
    trading a player he doesn't have yet), his stated preferences
@@ -65,7 +88,17 @@ vs his droppable bench).
    ~80% of a trade target's value at a thin position, say so — the wire
    may make the trade unnecessary (especially 4-team). In 14-team,
    treat a suggested add as real only if the player is startable at a
-   position where Wesley is thin.
+   position where Wesley is thin. Two vetoes on waiver adds:
+   - **Injury veto.** Never suggest adding a player flagged Out, IR,
+     Doubtful, or Suspended (the engine marks them `[!...]` and excludes
+     them from suggestions). Questionable is fine, named with the tag.
+     Values go stale on injury news — a high number next to an injury
+     flag is a trap, not a find.
+   - **Proven-starter tiebreak.** Don't churn a healthy, proven starter
+     for an unproven free agent on a modest value gap. The gap needs to
+     be decisive (roughly 40%+) or the current starter unstartable.
+     A bird in hand — this is the same instinct as holding Loveland
+     over Otton, applied in reverse.
 
 ## Output contract
 
