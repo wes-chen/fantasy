@@ -39,10 +39,12 @@ lineup are dropped outright), hole-creating options it refuses to price
 on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
 and who holds him: mine/free/opponent), and a waiver-wire section (top
 free agents by position on FantasyCalc redraft value, trending velocity
-(G3 — Sleeper-wide adds, 24h rate vs 48h/168h baseline: NEW/HEATING/
-COOLING), add/drop suggestions vs his droppable bench, and a roster-clog
-audit (G8 — bench ranked by contingent value; handcuffs, hurt-starter
-backups, and rising-usage players are protected, never named as drops)).
+(G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
+since the previous scan, from our own timestamped snapshot history:
+NEW/HEATING/COOLING), add/drop suggestions vs his droppable bench, and
+a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
+hurt-starter backups, and rising-usage players are protected, never
+named as drops)).
 The header also prints the season clock: current NFL week, weeks to the
 trade deadline, and the posture below.
 
