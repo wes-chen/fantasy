@@ -23,6 +23,7 @@ import tempfile
 SKILL = os.path.expanduser("~/workspace/skills/fantasy-trade-analyst")
 sys.path.insert(0, os.path.join(SKILL, "bin"))
 import trade_board as tb  # noqa: E402  (import runs no network)
+import fantasy_insights as fi  # noqa: E402
 
 SNAPUSA = "1320161122837368832"
 WW = "1379714328738955264"
@@ -123,6 +124,241 @@ check("pending_offers.md: Pittman ON-BLOCK",
       "6819" in real and real["6819"]["partner"] == "ydai",
       f"got {real}")
 
+# ---------------- G1-G10 ----------------
+print("== G1-G10 unit ==")
+
+# --- G1: usage gaps ---
+_U = {
+    ("josh downs", "IND", "WR"): {"name": "Josh Downs", "pos": "WR",
+        "team": "IND", "games": 2, "targets_pg": 9.0, "target_share": 0.28,
+        "air_yards_share": 0.30, "wopr": 0.63, "carries_pg": 0.5,
+        "tds_pg": 0.0, "ppg": 8.0, "offense_pct": 0.85, "racr": 0.60},
+    ("td merchant", "KC", "WR"): {"name": "TD Merchant", "pos": "WR",
+        "team": "KC", "games": 2, "targets_pg": 3.0, "target_share": 0.12,
+        "air_yards_share": 0.10, "wopr": 0.25, "carries_pg": 0.2,
+        "tds_pg": 1.5, "ppg": 16.0, "offense_pct": 0.50, "racr": 1.40},
+    ("one gamer", "BUF", "RB"): {"name": "One Gamer", "pos": "RB",
+        "team": "BUF", "games": 1, "targets_pg": 8.0, "target_share": 0.25,
+        "air_yards_share": 0.20, "wopr": 0.60, "carries_pg": 2.0,
+        "tds_pg": 0.0, "ppg": 4.0, "offense_pct": 0.80, "racr": 0.50},
+}
+_buys, _sells = fi.usage_gaps(_U)
+check("G1: buy-low on elite usage + poor output",
+      any(b["name"] == "Josh Downs" for b in _buys))
+check("G1: sell-high on TD-inflated thin usage",
+      any(s["name"] == "TD Merchant" for s in _sells))
+check("G1: min-games gate keeps the 1-game sample out",
+      not any(b["name"] == "One Gamer" for b in _buys))
+check("G1: yards-behind-air-yards note present",
+      any("yards lag air yards" in b["note"] for b in _buys))
+check("G1: expected output rises with usage",
+      fi.expected_ppg({"pos": "WR", "wopr": 0.6})
+      > fi.expected_ppg({"pos": "WR", "wopr": 0.2}))
+check("G1: transparent ppr_points formula",
+      abs(fi.ppr_points({"passing_yards": 250, "passing_tds": 2,
+                         "receptions": 5, "receiving_yards": 50,
+                         "receiving_tds": 1,
+                         "rushing_fumbles_lost": 1}) - 32.0) < 0.01)
+
+# --- G2: trade profiles ---
+_TRADES = [
+    {"round": 2,
+     "adds": {"p1": "10", "p2": "20"}, "drops": {"p1": "20", "p2": "10"}},
+    {"round": 7, "adds": {"p3": "10"}, "drops": {"p3": "30"}},
+]
+_PPOS = {"p1": "QB", "p2": "WR", "p3": "RB"}.get
+_PVAL = {"p1": 5000, "p2": 4000, "p3": 3000}.get
+_NAMES = {"10": "MgrA", "20": "MgrB", "30": "MgrC"}
+_PROFS = fi.trade_profiles(_TRADES, _PPOS, _PVAL, _NAMES)
+check("G2: per-manager trade counts",
+      _PROFS["10"]["n_trades"] == 2 and _PROFS["20"]["n_trades"] == 1)
+check("G2: acquired/sent positions mined",
+      _PROFS["10"]["acquired_pos"].get("QB") == 1
+      and _PROFS["10"]["sent_pos"].get("WR") == 1)
+check("G2: first/last trade timing",
+      _PROFS["10"]["first_round"] == 2 and _PROFS["10"]["last_round"] == 7)
+check("G2: net FantasyCalc value signed correctly",
+      _PROFS["10"]["net_value"] == 4000
+      and _PROFS["20"]["net_value"] == -1000)
+check("G2: profile_line names the manager and a position",
+      "MgrA" in fi.profile_line(_PROFS["10"])
+      and "QB" in fi.profile_line(_PROFS["10"]))
+
+# --- G3: trending velocity ---
+_W3 = {24: [{"player_id": "1", "count": 4800}, {"player_id": "2", "count": 600}],
+       48: [{"player_id": "1", "count": 4800}, {"player_id": "2", "count": 2400}],
+       168: [{"player_id": "1", "count": 4800},
+             {"player_id": "2", "count": 8400}]}
+_PL3 = {"1": {"full_name": "Hot Hand", "position": "RB"},
+        "2": {"full_name": "Cold Case", "position": "WR"},
+        "3": {"full_name": "Rostered Guy", "position": "TE"}}
+_V3 = fi.trending_velocity(_W3, _PL3, {"3"})
+check("G3: accelerating adds tag HEATING",
+      any(r["sid"] == "1" and r["tag"] == "HEATING" for r in _V3))
+check("G3: decelerating adds tag COOLING",
+      any(r["sid"] == "2" and r["tag"] == "COOLING" for r in _V3))
+check("G3: rostered players excluded",
+      all(r["sid"] != "3" for r in _V3))
+check("G3: velocity sorted by acceleration",
+      _V3[0]["accel"] >= _V3[1]["accel"])
+check("G3: lookbacks are exactly 24/48/168h", fi.G3_LOOKBACKS == (24, 48, 168))
+_V3N = fi.trending_velocity(
+    {24: [{"player_id": "9", "count": 2400}]},
+    {"9": {"full_name": "New Guy", "position": "RB"}}, set())
+check("G3: absent from both baseline windows -> NEW, never faked",
+      _V3N[0]["tag"] == "NEW" and _V3N[0]["accel"] is None)
+_V3B = fi.trending_velocity(
+    {24: [{"player_id": "8", "count": 4800}],
+     48: [{"player_id": "8", "count": 4800}]},
+    {"8": {"full_name": "Fallback Guy", "position": "WR"}}, set())
+check("G3: 48h baseline used when 168h is missing",
+      _V3B[0]["base"] == "48h" and _V3B[0]["accel"] == 2.0)
+
+# --- G4: playoff simulation ---
+_REC4 = {"a": (2, 0, 0), "b": (1, 1, 0), "c": (0, 2, 0), "d": (1, 1, 0)}
+_SCH4 = {"a": ["b", "c"], "b": ["a", "d"],
+         "c": ["a", "d"], "d": ["b", "c"]}
+_P4A = fi.simulate_playoffs(_REC4, _SCH4, 2, sims=500, seed=7)
+_P4B = fi.simulate_playoffs(_REC4, _SCH4, 2, sims=500, seed=7)
+check("G4: simulation is deterministic under a seed", _P4A == _P4B)
+check("G4: best record gets the highest probability",
+      _P4A["a"][0] > _P4A["d"][0] > _P4A["c"][0])
+check("G4: probabilities bounded in [0,1]",
+      all(0.0 <= v[0] <= 1.0 for v in _P4A.values()))
+check("G4: posture thresholds",
+      fi.posture_for(0.7).startswith("CONTENDER")
+      and fi.posture_for(0.4).startswith("BUBBLE")
+      and fi.posture_for(0.1).startswith("LONGSHOT"))
+
+# --- G5: playoff-schedule weighting ---
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season_type,week,away_team,home_team\n"
+              "REG,15,KC,DEN\nREG,16,KC,JAX\nREG,17,KC,TEN\n"
+              "REG,15,BUF,NE\nREG,16,BUF,PIT\nREG,17,BUF,BAL\n")
+    _GF = _fh.name
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season_type,position,opponent_team,game_id,"
+              "rushing_yards,rushing_tds\n"
+              "REG,RB,DEN,g1,150,2\nREG,RB,JAX,g2,130,2\n"
+              "REG,RB,TEN,g3,110,2\nREG,RB,NE,g4,30,0\n"
+              "REG,RB,PIT,g5,50,0\nREG,RB,BAL,g6,60,0\n")
+    _SF = _fh.name
+_PM = fi.playoff_multipliers(
+    _GF, _SF,
+    {("soft back", "KC", "RB"): ("KC", "RB"),
+     ("tough back", "BUF", "RB"): ("BUF", "RB")},
+    (15, 16, 17))
+os.unlink(_GF)
+os.unlink(_SF)
+check("G5: soft playoff path boosts value (>1.0)",
+      _PM[("soft back", "KC", "RB")][0] > 1.0)
+check("G5: brutal playoff path discounts value (<1.0)",
+      _PM[("tough back", "BUF", "RB")][0] < 1.0)
+check("G5: multipliers clamped to 0.90-1.10",
+      all(0.90 <= v[0] <= 1.10 for v in _PM.values()))
+check("G5: tags label the schedule",
+      _PM[("soft back", "KC", "RB")][1] == "[P+ soft]"
+      and _PM[("tough back", "BUF", "RB")][1] == "[P- brutal]")
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season_type,week,away_team,home_team\n"
+              "REG,15,KC,DEN\nREG,17,KC,TEN\n")
+    _GB = _fh.name
+_PB = fi.playoff_multipliers(
+    _GB, _GB, {("bye back", "KC", "RB"): ("KC", "RB")}, (15, 16, 17))
+os.unlink(_GB)
+check("G5: playoff bye flattens the multiplier",
+      _PB[("bye back", "KC", "RB")] == (0.85, "[PLAYOFF BYE W16]"))
+
+# --- G6: handcuff map ---
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("dt,team,player_name,gsis_id,pos_abb,pos_rank\n"
+              "2026-09-01T00:00:00Z,KC,Starter Back,gsis1,RB,1\n"
+              "2026-09-21T00:00:00Z,KC,Starter Back,gsis1,RB,1\n"
+              "2026-09-01T00:00:00Z,KC,Ex Backup,gsis2,RB,3\n"
+              "2026-09-21T00:00:00Z,KC,Backup Back,gsis2,RB,2\n")
+    _DC = _fh.name
+_DEP = fi.parse_depth_charts(_DC)
+os.unlink(_DC)
+check("G6: latest snapshot wins for the same player",
+      [n for _, n, _ in _DEP["KC"]["RB"]]
+      == ["Starter Back", "Backup Back"])
+_PL6 = {"s1": {"full_name": "Starter Back", "position": "RB",
+               "team": "KC", "gsis_id": "gsis1"},
+        "s2": {"full_name": "Backup Back", "position": "RB",
+               "team": "KC", "gsis_id": "gsis2"},
+        "s3": {"full_name": "Other Guy", "position": "RB",
+               "team": "KC", "gsis_id": "gsis9"}}
+_HM = fi.handcuff_map(_DEP, ["s1"], {"9": ["s1"]}, _PL6,
+                      {"9": "Me", "10": "Opp"}, "9")
+check("G6: lead RB with a free backup flagged",
+      _HM[0]["lead"] is True
+      and _HM[0]["backups"][0]["status"] == "free")
+_HM2 = fi.handcuff_map(_DEP, ["s1"], {"9": ["s1"], "10": ["s2"]}, _PL6,
+                       {"9": "Me", "10": "Opp"}, "9")
+check("G6: backup held by an opponent labeled",
+      _HM2[0]["backups"][0]["status"] == "opp:Opp")
+_HM3 = fi.handcuff_map(_DEP, ["s3"], {"9": ["s1", "s3"]}, _PL6,
+                       {"9": "Me"}, "9")
+check("G6: my RB who is not the lead is flagged",
+      _HM3[0]["lead"] is False)
+
+# --- G7: schedule luck ---
+_LUCK = fi.schedule_luck(
+    {1: [("a", 120), ("b", 100), ("c", 90), ("d", 110)],
+     2: [("a", 95), ("b", 115), ("c", 105), ("d", 85)]},
+    {"a": (2, 0, 0), "b": (1, 1, 0), "c": (0, 2, 0), "d": (1, 1, 0)})
+check("G7: all-play expected wins summed over weeks (0-2 scale)",
+      abs(_LUCK["a"]["expected"] - 1.33) < 0.01
+      and abs(_LUCK["c"]["expected"] - 0.67) < 0.01)
+check("G7: wins, expected and weeks all reported",
+      set(_LUCK["a"]) == {"wins", "expected", "weeks"}
+      and _LUCK["a"]["wins"] == 2)
+
+# --- G8: roster clog audit ---
+_R8, _D8 = fi.clog_audit(
+    [{"sid": "1", "name": "Clogger", "pos": "WR", "val": 1000, "inj": ""},
+     {"sid": "2", "name": "Cuff", "pos": "RB", "val": 1000, "inj": ""},
+     {"sid": "3", "name": "Blocked", "pos": "TE", "val": 10, "inj": ""}],
+    handcuff_of={"2": True}, onblock={"3"})
+check("G8: contingent-value handcuff outranks the clogger",
+      _R8[-1]["name"] == "Cuff" and _R8[0]["name"] == "Blocked")
+check("G8: drops name the clogger, never on-block or handcuffs",
+      _D8 == ["Clogger"])
+
+# --- G9: bye craters ---
+_CR = fi.bye_craters({"1": 7, "2": 7, "3": 8}, ["1", "2", "3"],
+                      ["1", "2"], 6)
+check("G9: 2+ starters on bye flags a crater",
+      _CR[7]["crater"] is True and _CR[7]["total"] == 2)
+check("G9: no starters on bye is not a crater",
+      _CR[8]["crater"] is False)
+check("G9: forecast window is the next 4 weeks",
+      sorted(_CR) == [7, 8, 9, 10])
+
+# --- G10: betting odds ---
+_ITEM = {"provider": {"name": "Draft Kings"}, "details": "GB -6",
+         "overUnder": 44.5, "spread": -6.0,
+         "homeTeamOdds": {"favorite": True, "moneyLine": -290},
+         "awayTeamOdds": {"favorite": False, "moneyLine": 235},
+         "open": {"total": {"alternateDisplayValue": "46.5"}}}
+_G10 = fi.parse_odds_item(_ITEM, "ATL", "GB")
+check("G10: DraftKings game odds parsed",
+      _G10["fav"] == "GB" and _G10["line"] == 6.0
+      and _G10["total"] == 44.5 and _G10["fav_impl"] == 25.2)
+check("G10: unusable odds item returns None",
+      fi.parse_odds_item({"provider": {"name": "X"}}, "A", "B") is None)
+_SIG = fi.start_sit_signals([dict(_G10, line=7.5, total=49.0)],
+                            {"p1": ("My RB", "RB", "GB")})
+check("G10: big-favorite shootout signals fire",
+      any("positive script" in s for s in _SIG)
+      and any("shootout" in s for s in _SIG))
+check("G10: no rostered pieces in a game means no signals",
+      fi.start_sit_signals([_G10], {"p9": ("Other", "WR", "NE")}) == [])
+
 # ---------------- integration ----------------
 print("== integration ==")
 
@@ -147,14 +383,25 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: trade-lock boundary line (ADV-FF-14)",
           "Trade lock: trades legal through NFL Week" in out)
     for hdr in ("=== LEAGUE TRADE HISTORY (market comps) ===",
+                "=== MANAGER TRADE PROFILES (G2",
                 "=== TEAM NEEDS (startable vs effective slots) ===",
+                "=== PLAYOFF ODDS + SCHEDULE LUCK (G4/G7",
                 "=== YOUR ROSTER (by value) ===",
+                "=== BYE-CRATER FORECAST (G9",
+                "=== USAGE-GAP RADAR (G1",
                 "=== HOLE-CREATING OPTIONS (persona must price the roster cost) ===",
+                "=== HANDCUFF LEVERAGE MAP (G6",
                 "=== WAIVER WIRE ===",
                 "=== WAIVER PRIORITY COST ==="):
         check(f"{tag}: header stable: {hdr[:30]}...", hdr in out)
     check(f"{tag}: hold-vs-spend line present",
           "hold-vs-spend" in out and "P(better target emerges" in out)
+    check(f"{tag}: G3 trending velocity line",
+          "trending velocity (Sleeper-wide adds" in out)
+    check(f"{tag}: G1 routes-unavailable label",
+          "routes are unavailable" in out)
+    check(f"{tag}: G8 roster-clog audit line",
+          "roster-clog audit (G8" in out)
 
 out = run_board(SNAPUSA).stdout
 check("snapusa: PENDING OFFERS section (ADV-FF-07)",
@@ -164,11 +411,17 @@ check("snapusa: Pittman flagged ON-BLOCK (ADV-FF-07)",
 check("snapusa: posture line present", "| posture:" in out)
 
 out_ww = run_board(WW).stdout
-check("NF-01: WW slot line: 1 of 4, SCARCE",
-      "weekend warriors waiver slot: 1 of 4 — SCARCE" in out_ww)
-check("NF-01: snapusa slot line: 7 of 14, not scarce",
-      "snapusa waiver slot: 7 of 14" in out
-      and "snapusa waiver slot: 7 of 14 — SCARCE" not in out)
+# NF-01: slot values reset weekly in Sleeper — assert the line's internal
+# consistency (SCARCE iff slot <= 3) instead of a hardcoded slot number.
+_m = re.search(r"snapusa waiver slot: (\d+) of 14( — SCARCE)?", out)
+check("NF-01: snapusa slot line self-consistent",
+      bool(_m) and (("— SCARCE" in _m.group(0))
+                    == (int(_m.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
+_m2 = re.search(r"weekend warriors waiver slot: (\d+) of 4( — SCARCE)?",
+                out_ww)
+check("NF-01: WW slot line self-consistent",
+      bool(_m2) and (("— SCARCE" in _m2.group(0))
+                     == (int(_m2.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
 
 print()
 if failures:
