@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 SKILL = os.path.expanduser("~/workspace/skills/fantasy-trade-analyst")
 sys.path.insert(0, os.path.join(SKILL, "bin"))
@@ -184,15 +185,14 @@ check("G2: profile_line names the manager and a position",
       "MgrA" in fi.profile_line(_PROFS["10"])
       and "QB" in fi.profile_line(_PROFS["10"]))
 
-# --- G3: trending velocity ---
-_W3 = {24: [{"player_id": "1", "count": 4800}, {"player_id": "2", "count": 600}],
-       48: [{"player_id": "1", "count": 4800}, {"player_id": "2", "count": 2400}],
-       168: [{"player_id": "1", "count": 4800},
-             {"player_id": "2", "count": 8400}]}
+# --- G3: trending velocity (ONE call per scan + snapshot history) ---
 _PL3 = {"1": {"full_name": "Hot Hand", "position": "RB"},
         "2": {"full_name": "Cold Case", "position": "WR"},
         "3": {"full_name": "Rostered Guy", "position": "TE"}}
-_V3 = fi.trending_velocity(_W3, _PL3, {"3"})
+_NOW3 = time.time()
+_PREV3 = {"ts": _NOW3 - 24 * 3600, "counts": {"1": 2400, "2": 4800}}
+_CUR3 = {"1": 4800, "2": 600, "3": 9000}
+_V3 = fi.trending_velocity(_CUR3, _PREV3, _PL3, {"3"})
 check("G3: accelerating adds tag HEATING",
       any(r["sid"] == "1" and r["tag"] == "HEATING" for r in _V3))
 check("G3: decelerating adds tag COOLING",
@@ -201,18 +201,66 @@ check("G3: rostered players excluded",
       all(r["sid"] != "3" for r in _V3))
 check("G3: velocity sorted by acceleration",
       _V3[0]["accel"] >= _V3[1]["accel"])
-check("G3: lookbacks are exactly 24/48/168h", fi.G3_LOOKBACKS == (24, 48, 168))
+check("G3: accel = 24h rate vs previous-gap rate",
+      any(r["sid"] == "1" and r["accel"] == 2.0 for r in _V3),
+      f"got {[ (r['sid'], r['accel']) for r in _V3 ]}")
+_V3F = fi.trending_velocity(
+    {"1": 4800}, {"ts": _NOW3 - 600, "counts": {"1": 4800}},
+    {"1": {"full_name": "Fresh Base", "position": "RB"}}, set())
+check("G3: baseline less than an hour old -> NEW (too overlapping)",
+      _V3F[0]["tag"] == "NEW" and _V3F[0]["accel"] is None,
+      f"got {_V3F[0]}")
+_V3Z = fi.trending_velocity(
+    {"1": 0}, _PREV3,
+    {"1": {"full_name": "Dried Up", "position": "RB"}}, set())
+check("G3: adds dried up to zero -> COOLING at 0.0",
+      _V3Z[0]["tag"] == "COOLING" and _V3Z[0]["accel"] == 0.0,
+      f"got {_V3Z[0]}")
 _V3N = fi.trending_velocity(
-    {24: [{"player_id": "9", "count": 2400}]},
+    {"9": 2400}, None,
     {"9": {"full_name": "New Guy", "position": "RB"}}, set())
-check("G3: absent from both baseline windows -> NEW, never faked",
+check("G3: no prior snapshot -> NEW, never faked",
       _V3N[0]["tag"] == "NEW" and _V3N[0]["accel"] is None)
-_V3B = fi.trending_velocity(
-    {24: [{"player_id": "8", "count": 4800}],
-     48: [{"player_id": "8", "count": 4800}]},
-    {"8": {"full_name": "Fallback Guy", "position": "WR"}}, set())
-check("G3: 48h baseline used when 168h is missing",
-      _V3B[0]["base"] == "48h" and _V3B[0]["accel"] == 2.0)
+_V3N2 = fi.trending_velocity(
+    {"9": 2400}, _PREV3,
+    {"9": {"full_name": "New Guy", "position": "RB"}}, set())
+check("G3: absent from previous snapshot -> NEW, never faked",
+      _V3N2[0]["tag"] == "NEW" and _V3N2[0]["accel"] is None)
+
+# one-call-per-scan regression: count Sleeper calls through a scan
+_CALLS3 = []
+_ORIG_FETCH3 = fi.fetch_json
+
+
+def _counting_fetch3(url, *a, **k):
+    _CALLS3.append(url)
+    if "trending" in url:
+        return [{"player_id": "1", "count": 4800}]
+    return _ORIG_FETCH3(url, *a, **k)
+
+
+fi.fetch_json = _counting_fetch3
+try:
+    with tempfile.TemporaryDirectory() as _td3:
+        _SP3 = os.path.join(_td3, "snaps.json")
+        _rows3 = fi.fetch_trending()
+        _counts3 = {str(t.get("player_id")): t.get("count") or 0
+                    for t in _rows3}
+        fi.save_trend_snapshot(_counts3, ts=_NOW3 - 24 * 3600, path=_SP3)
+        _snaps3 = fi.load_trend_snapshots(path=_SP3)
+        _v3b = fi.trending_velocity(_counts3, _snaps3[-1], _PL3, set())
+finally:
+    fi.fetch_json = _ORIG_FETCH3
+check("G3: exactly one Sleeper call per scan",
+      len(_CALLS3) == 1 and "lookback_hours=24" in _CALLS3[0],
+      f"calls={_CALLS3}")
+check("G3: snapshot round-trips through the history file",
+      len(_snaps3) == 1 and _snaps3[0]["counts"] == {"1": 4800},
+      f"got {_snaps3}")
+check("G3: second scan derives velocity from snapshot history",
+      _v3b[0]["sid"] == "1" and _v3b[0]["accel"] == 1.0
+      and _v3b[0]["tag"] == "STEADY",
+      f"got {_v3b[0] if _v3b else None}")
 
 # --- G4: playoff simulation ---
 _REC4 = {"a": (2, 0, 0), "b": (1, 1, 0), "c": (0, 2, 0), "d": (1, 1, 0)}
@@ -230,12 +278,94 @@ check("G4: posture thresholds",
       and fi.posture_for(0.4).startswith("BUBBLE")
       and fi.posture_for(0.1).startswith("LONGSHOT"))
 
+# --- G4: PF/G double-division regression (the real bug class) ---
+_MW4 = {1: [{"roster_id": 1, "points": 200.0},
+            {"roster_id": 2, "points": 180.0}],
+        2: [{"roster_id": 1, "points": 100.0},
+            {"roster_id": 2, "points": 120.0}],
+        3: [{"roster_id": 1, "matchup_id": 1},
+            {"roster_id": 2, "matchup_id": 1}]}
+_ORIG_FETCH4 = fi.fetch_json
+
+
+def _fake_fetch4(url, *a, **k):
+    m = re.search(r"/matchups/(\d+)$", url)
+    if m:
+        return _MW4.get(int(m.group(1)), [])
+    return _ORIG_FETCH4(url, *a, **k)
+
+
+fi.fetch_json = _fake_fetch4
+try:
+    _SCHED4, _PFPG4 = fi.fetch_remaining_schedule("L", 3)
+finally:
+    fi.fetch_json = _ORIG_FETCH4
+check("G4: fetch_remaining_schedule returns points PER GAME",
+      _PFPG4.get("1") == 150.0 and _PFPG4.get("2") == 150.0,
+      f"got {_PFPG4}")
+check("G4: remaining schedule pairs the future matchups",
+      _SCHED4.get("1") == ["2"] and _SCHED4.get("2") == ["1"],
+      f"got {_SCHED4}")
+
+# CLI-level: cmd_playoff_odds must NOT divide pfpg again. Capture what the
+# simulator receives; the old bug halved it (100 -> 50 at week 3).
+_CAP4 = {}
+_ORIG_FRS4 = fi.fetch_remaining_schedule
+_ORIG_SIM4 = fi.simulate_playoffs
+_ORIG_FETCH4B = fi.fetch_json
+
+
+def _fake_fetch4b(url, *a, **k):
+    if url.endswith("/state/nfl"):
+        return {"week": 3}
+    if re.search(r"/league/L$", url):
+        return {"name": "T",
+                "settings": {"playoff_week_start": 15, "playoff_teams": 2}}
+    if url.endswith("/rosters"):
+        return [{"roster_id": 1, "owner_id": "me",
+                 "settings": {"wins": 2, "losses": 0, "ties": 0}}]
+    if url.endswith("/users"):
+        return [{"user_id": "me", "display_name": "Wesley"}]
+    if "/matchups/" in url:
+        return []
+    return _ORIG_FETCH4B(url, *a, **k)
+
+
+def _fake_frs4(lid, wk, last_week=18):
+    return {}, {"1": 100.0}
+
+
+def _fake_sim4(records, sched, pteams, pfpg=None, sims=20000, seed=42):
+    _CAP4["pfpg"] = dict(pfpg or {})
+    return {"1": (0.5, 9.0)}
+
+
+fi.fetch_json = _fake_fetch4b
+fi.fetch_remaining_schedule = _fake_frs4
+fi.simulate_playoffs = _fake_sim4
+try:
+    with tempfile.TemporaryDirectory() as _td4:
+        _a4 = type("A", (), {"league": ["L"], "me": "me",
+                             "out": os.path.join(_td4, "odds.md")})()
+        fi.cmd_playoff_odds(_a4)
+        _OUT4 = open(_a4.out).read()
+finally:
+    fi.fetch_json = _ORIG_FETCH4B
+    fi.fetch_remaining_schedule = _ORIG_FRS4
+    fi.simulate_playoffs = _ORIG_SIM4
+check("G4: playoff CLI passes PF/G through undivided (no second /weeks)",
+      _CAP4.get("pfpg") == {"1": 100.0},
+      f"simulator got pfpg={_CAP4.get('pfpg')}")
+check("G4: playoff CLI prints the true PF/G in the table",
+      "| 100.0 |" in _OUT4,
+      f"table line: {[l for l in _OUT4.splitlines() if 'Wesley' in l][:2]}")
+
 # --- G5: playoff-schedule weighting ---
 with tempfile.NamedTemporaryFile("w", suffix=".csv",
                                  delete=False) as _fh:
-    _fh.write("season_type,week,away_team,home_team\n"
-              "REG,15,KC,DEN\nREG,16,KC,JAX\nREG,17,KC,TEN\n"
-              "REG,15,BUF,NE\nREG,16,BUF,PIT\nREG,17,BUF,BAL\n")
+    _fh.write("season,season_type,week,away_team,home_team\n"
+              "2026,REG,15,KC,DEN\n2026,REG,16,KC,JAX\n2026,REG,17,KC,TEN\n"
+              "2026,REG,15,BUF,NE\n2026,REG,16,BUF,PIT\n2026,REG,17,BUF,BAL\n")
     _GF = _fh.name
 with tempfile.NamedTemporaryFile("w", suffix=".csv",
                                  delete=False) as _fh:
@@ -263,14 +393,88 @@ check("G5: tags label the schedule",
       and _PM[("tough back", "BUF", "RB")][1] == "[P- brutal]")
 with tempfile.NamedTemporaryFile("w", suffix=".csv",
                                  delete=False) as _fh:
-    _fh.write("season_type,week,away_team,home_team\n"
-              "REG,15,KC,DEN\nREG,17,KC,TEN\n")
+    # A genuine bye: W16 HAS games, KC just isn't in one. (A file with no
+    # W16 rows at all is an unsupported week, not a bye.)
+    _fh.write("season,season_type,week,away_team,home_team\n"
+              "2026,REG,15,KC,DEN\n2026,REG,17,KC,TEN\n"
+              "2026,REG,16,DEN,JAX\n2026,REG,16,BUF,NE\n")
     _GB = _fh.name
 _PB = fi.playoff_multipliers(
     _GB, _GB, {("bye back", "KC", "RB"): ("KC", "RB")}, (15, 16, 17))
 os.unlink(_GB)
 check("G5: playoff bye flattens the multiplier",
       _PB[("bye back", "KC", "RB")] == (0.85, "[PLAYOFF BYE W16]"))
+
+# --- G5: team universe + games.csv column layout (the real bug class) ---
+# The live games.csv uses `game_type`, not `season_type` — the reader
+# must see the schedule in the real file, not just the old fixtures.
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2026,REG,15,KC,DEN\n2026,REG,16,KC,JAX\n2026,REG,17,KC,TEN\n")
+    _GG5 = _fh.name
+_OPPS5, _MISS5 = fi.load_playoff_opponents(_GG5, (15, 16, 17))
+os.unlink(_GG5)
+check("G5: reads the live games.csv game_type column",
+      "KC" in _OPPS5 and any(w == 15 and o == "DEN"
+                             for w, o in _OPPS5["KC"]),
+      f"KC rows: {_OPPS5.get('KC')}")
+check("G5: fully-covered weeks report nothing missing",
+      _MISS5 == [], f"got {_MISS5}")
+check("G5: team universe is the fixed 32-team NFL set",
+      len(fi.NFL_TEAMS) == 32 and "KC" in fi.NFL_TEAMS)
+check("G5: team with no rows is idle (bye), not a crash",
+      _OPPS5.get("ARI") and all(o is None for _, o in _OPPS5["ARI"]),
+      f"ARI rows: {_OPPS5.get('ARI')}")
+
+# A playoff week with NO schedule rows is unsupported — it must not
+# mint 32 phantom byes.
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2026,REG,15,KC,DEN\n2026,REG,17,KC,TEN\n")
+    _GM5 = _fh.name
+_OM5, _MISSM5 = fi.load_playoff_opponents(_GM5, (15, 16, 17))
+os.unlink(_GM5)
+check("G5: week with no rows is unsupported, not 32 phantom byes",
+      _MISSM5 == [16]
+      and not any(o is None for w, o in _OM5.get("KC", []) if w == 16)
+      and not any(o is None for w, o in _OM5.get("ARI", []) if w == 16),
+      f"missing={_MISSM5} KC={_OM5.get('KC')}")
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2026,REG,15,KC,DEN\n2026,REG,17,KC,TEN\n")
+    _GMW5 = _fh.name
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season_type,position,opponent_team,game_id,"
+              "rushing_yards,rushing_tds\n"
+              "REG,RB,DEN,g1,150,2\nREG,RB,TEN,g3,110,2\n")
+    _SMW5 = _fh.name
+_PMW5 = fi.playoff_multipliers(
+    _GMW5, _SMW5, {("bye back", "KC", "RB"): ("KC", "RB")}, (15, 16, 17))
+os.unlink(_GMW5)
+os.unlink(_SMW5)
+check("G5: unsupported playoff week -> marked neutral, never faked",
+      _PMW5[("bye back", "KC", "RB")][0] == 1.0
+      and "unavailable" in _PMW5[("bye back", "KC", "RB")][1]
+      and "W16" in _PMW5[("bye back", "KC", "RB")][1],
+      f"got {_PMW5[('bye back', 'KC', 'RB')]}")
+
+# Multi-season file isolation: rows from other seasons must not blend
+# into this season's playoff slate (the cached games.csv spans 1999+).
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2025,REG,15,KC,DEN\n"
+              "2026,REG,15,KC,JAX\n")
+    _GS5 = _fh.name
+_OS5, _MS5 = fi.load_playoff_opponents(_GS5, (15,))
+os.unlink(_GS5)
+check("G5: only the requested season's slate is used",
+      _OS5.get("KC") == [(15, "JAX")] and _MS5 == [],
+      f"KC rows: {_OS5.get('KC')}, missing={_MS5}")
 
 # --- G6: handcuff map ---
 with tempfile.NamedTemporaryFile("w", suffix=".csv",
