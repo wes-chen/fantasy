@@ -14,7 +14,58 @@
   roster_id. `drops` mirrors it.
 - Players DB: `GET https://api.sleeper.app/v1/players/nfl` (~15MB).
   Cache it (Sleeper asks you to); refresh weekly. Keys are Sleeper IDs.
-- Trending: `GET /v1/players/nfl/trending/add?lookback_hours=24&limit=25`
+- Trending: `GET /v1/players/nfl/trending/add?lookback_hours={24,48,168}&limit=25`
+  (Sleeper-WIDE add counts across all leagues, not league-specific —
+  a proxy for waiver urgency, never presented as his league's adds).
+  G3 velocity = 24h adds/hour vs the 48h/168h baseline per player
+  (168h preferred; 48h fallback; absent from both → NEW, never faked).
+  One call per window per scan, 1s apart.
+
+## nflverse (bulk CSVs, no auth — verified 2026-09-22)
+
+Release-tagged flat files (nflverse/nflverse-data on GitHub). The engine
+caches them 24h (`nflverse_paths()`); every consumer degrades to a
+marked stub when the fetch fails.
+
+- Player weekly stats: release `player_stats`, file
+  `stats_player_week_2026.csv.gz` — `target_share`, `air_yards_share`,
+  `receiving_air_yards`, `receiving_epa`, `targets`, fantasy points.
+  Powers G1 (usage-gap radar) and G5 (defensive strength allowed by
+  position).
+- Snap counts: release `snap_counts`, file `snap_counts_2026.csv` —
+  `offense_snaps`, `offense_pct`. G1 snap proxy + G6 INFERRED fallback.
+- Depth charts: release `depth_charts`, file `depth_charts_2026.csv`
+  (~52MB) — daily snapshots; dedupe by latest `dt` PER GSIS ID, not per
+  name (names change between snapshots; name-keying leaves phantom
+  duplicates). Powers G6 handcuff map.
+- Schedules: release `schedules`, file `games.csv.gz` (NOT
+  `sched_2026.csv` — that path 404s). Carries ESPN event IDs per game.
+  Powers G5 (W15-17 opponents).
+
+HARD LIMIT: route participation is in NONE of the free sources
+(nflverse, PFR, FTN). Never synthesize it — target share + air-yards
+share + snap% are the route proxies and are labeled as such everywhere
+they appear.
+
+Join to Sleeper IDs on normalized (name, team, pos): ~95% of his
+skill-position roster matched on 2026-09-22 (Sleeper's own GSIS
+coverage is only ~31%, so name+team+pos is the working join).
+
+## ESPN odds (core API — verified 2026-09-22)
+
+- The public scoreboard endpoint
+  (`site.api.espn.com/apis/site/v2/sports/nfl/scoreboard`) returns 403
+  from this network despite a browser User-Agent. Do not use it.
+- Working path:
+  `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/{eventId}/competitions/{eventId}/odds?limit=50`.
+  Game IDs come from nflverse `games.csv.gz` (ESPN event IDs). Parse the
+  `Draft Kings` provider entry (`provider.name == "Draft Kings"`).
+- GAME-LEVEL ONLY: spread, total, moneylines. No player props exist in
+  free data. G10 turns these into start/sit script + shootout signals
+  (line >= 6.5 → positive script for the favorite's pieces; total >=
+  47.5 → shootout watch; underdog + line >= 6.5 → negative script).
+- Degraded path: keep the last good `hidden_files/game-odds.md`, exit
+  nonzero, print "No pricing data available today".
 
 Wesley: username `weslchen`, user_id `1264143735290081280`.
 
