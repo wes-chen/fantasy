@@ -7,7 +7,7 @@ content actually changed.
 
 Usage:
   push_to_github.py "<commit message>" [file ...]
-  (defaults to the synced set: SKILL.md, bin/trade_board.py,
+  (defaults to the synced set: SKILL.md, bin/trade_board.py, tests/test_golden.py,
    references/api_notes.md, bin/push_to_github.py)
 """
 import sys
@@ -23,7 +23,7 @@ from dynamic_credentials import add_surrogate_to_request, read_json_response
 REPO = "wes-chen/fantasy"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_ROOT = os.path.dirname(HERE)
-DEFAULT_FILES = ["SKILL.md", "bin/trade_board.py",
+DEFAULT_FILES = ["SKILL.md", "bin/trade_board.py", "tests/test_golden.py",
                  "references/api_notes.md", "bin/push_to_github.py"]
 ALLOWED_HOSTS = ["api.github.com"]
 
