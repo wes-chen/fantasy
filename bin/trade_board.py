@@ -17,6 +17,114 @@ import argparse, json, os, re, sys, urllib.request
 SLEEPER = "https://api.sleeper.app/v1"
 FC = "https://api.fantasycalc.com/values/current"
 
+# --- tuning constants (see gap-analysis ADV-FF-05/06/09/10) ---
+CHURN_THRESHOLD = 1.4  # persona veto (SKILL.md judgment 7): no ADD/DROP churn
+                       # below a ~40% value edge — a 12% edge in the 14-team
+                       # desert means dropping a healthy contributor for a
+                       # streamer, exactly the churn the persona prevents.
+WPOS = ("QB", "RB", "WR", "TE", "K", "DEF")  # waiver model covers K/DEF:
+                       # Wesley's real claims are mostly K/DST.
+HURT = ("Out", "IR", "Doubtful", "Suspended")  # never suggest adding
+# --- NF-01: waiver priority cost model (see gap-analysis NF-01) ---
+# The engine suggests ADD/DROP pairs but never priced the priority slot
+# burned. Opportunity cost = P(a better target emerges before the weekly
+# Tuesday reset) x typical pickup value; scarce slots demand a bigger edge.
+BASE_EMERGE = 0.6     # ~3-in-5 weeks a claim-worthy target emerges on a RICH
+                      # wire; scaled down by wire richness for deep leagues
+SCARCE_SLOT_CUTOFF = 3  # slots 1..3 are scarce: spending one is a real cost
+SCARCE_SLOT_MIN_EDGE = 0.75  # a scarce slot demands a >=75% value upgrade
+                      # (stricter than the 40% CHURN_THRESHOLD gate) —
+                      # a 40% edge means less when it costs the #1 slot
+TYPICAL_EDGE_FALLBACK = 6.0  # assumed median pickup edge when this run
+                      # suggests no moves; ~one flex-starter tier jump
+
+def wire_richness(num_teams):
+    """Wire talent density: small-league wires are rich (replacement level
+    is high, a better target almost always emerges); 14-team wires are a
+    desert where most weeks nothing claim-worthy appears."""
+    if num_teams <= 6:
+        return 1.0
+    if num_teams <= 10:
+        return 0.6
+    return 0.3
+
+def waiver_slot(rosters, me):
+    """Wesley's waiver slot from settings.waiver_position (field verified
+    against live Sleeper rosters output). Falls back to roster_id order —
+    Sleeper's default display order — if the field is ever absent."""
+    mine = next((r for r in rosters if r.get("owner_id") == me), None)
+    if mine is None:
+        return None
+    wp = (mine.get("settings") or {}).get("waiver_position")
+    if wp:
+        return int(wp)
+    ordered = sorted(rosters, key=lambda r: r.get("roster_id") or 0)
+    return next(i for i, r in enumerate(ordered, 1)
+                if r.get("owner_id") == me)
+
+def slot_scarcity(position, num_teams):
+    """0..1: 1.0 at #1 (top of the order), ~0 at the tail (near-free)."""
+    return max(0.0, 1.0 - (position - 1) / max(num_teams, 1))
+
+def hold_value(position, num_teams, typical_edge):
+    """Expected value of holding the slot: P(better target emerges before
+    the Tuesday reset) x typical pickup edge.
+
+    P = base emergence x slot scarcity x wire richness. Rationale: in a
+    rich-wire small league a #1 slot is likely to catch a better target
+    next week; in a thin-wire deep league at #7 the slot is nearly free."""
+    p = (BASE_EMERGE * slot_scarcity(position, num_teams)
+         * wire_richness(num_teams))
+    return p, p * typical_edge
+
+def slot_verdict(edge, drop_val, position, num_teams, forced=False):
+    """NF-01 slot-cost veto: a scarce (top-3) slot burned on a marginal gain
+    is flagged HOLD. Layers on top of the 1.4x CHURN_THRESHOLD — a claim that
+    clears the churn gate can still be a bad spend at #1. Forced
+    replacements (a hurt starter must be replaced) are never flagged."""
+    if forced or edge is None or drop_val is None:
+        return None
+    if position is not None and position <= SCARCE_SLOT_CUTOFF:
+        if edge < SCARCE_SLOT_MIN_EDGE * drop_val:
+            return (f"BURNS #{position} — edge too thin, HOLD "
+                    f"(scarce slot needs >={SCARCE_SLOT_MIN_EDGE:.0%} "
+                    f"upgrade)")
+    return None
+INJURY_DISCOUNT = {  # E5: discount stale values before RANKING (ADV-FF-10)
+    "Out": 0.5, "IR": 0.5, "Suspended": 0.5,
+    "Doubtful": 0.7, "Questionable": 0.85,
+}
+
+def injury_discount(status):
+    """Value multiplier for an injury designation (E5)."""
+    return INJURY_DISCOUNT.get(status or "", 1.0)
+
+def count_flex_slots(roster_positions):
+    """Exact 'FLEX' slots only — 'SUPER_FLEX' is a QB slot in disguise.
+    (ADV-FF-09: `"FLEX" in "SUPER_FLEX"` modeled 10 starters in snapusa;
+    real offensive slots are 9.)"""
+    return sum(1 for s in roster_positions if s == "FLEX")
+
+def load_pending_offers(path):
+    """Wesley's own open trade offers. Returns {player_id: info} for
+    status=pending rows. (ADV-FF-07: engine must not double-commit a player
+    he has already offered.)"""
+    onblock = {}
+    try:
+        fh = open(path)
+    except FileNotFoundError:
+        return onblock
+    for line in fh:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 5 and parts[4].lower() == "pending":
+            onblock[parts[0]] = {"name": parts[1], "partner": parts[2],
+                                 "date": parts[3],
+                                 "notes": parts[5] if len(parts) > 5 else ""}
+    return onblock
+
 def get(url):
     req = urllib.request.Request(url, headers={"User-Agent": "trade-board/1.0"})
     return json.load(urllib.request.urlopen(req, timeout=30))
@@ -104,6 +212,14 @@ def main():
     except Exception:
         nfl_week = 1
     trade_dl = (league.get("settings") or {}).get("trade_deadline") or 11
+    # ADV-FF-14: one canonical boundary shared with fantasy-trade-deadline-stop.
+    # Sleeper trade_deadline=N means trades are legal THROUGH NFL Week N;
+    # the lock takes effect when the state week rolls to N+1. (Lock semantics
+    # are a documented-community convention, not API-verified; if Sleeper
+    # ever locks at the start of the deadline week, move the boundary to
+    # `nfl_week >= trade_dl` and the stop job one week earlier.)
+    trade_review_days = (league.get("settings") or {}).get(
+        "trade_review_days", 0)
     if nfl_week > trade_dl:
         posture = "DEADLINE PASSED: waivers only"
     elif nfl_week >= 9:
@@ -134,6 +250,11 @@ def main():
     rid2name = {r["roster_id"]: uname.get(r["owner_id"], "?") for r in rosters}
     my_rid = next((r["roster_id"] for r in rosters if r["owner_id"] == a.me), None)
 
+    # --- Wesley's own pending offers: ON-BLOCK players (ADV-FF-07) ---
+    pending_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "pending_offers.md"))
+    onblock = load_pending_offers(pending_path)
+
     def pname(pid):
         p = players.get(str(pid), {})
         return p.get("full_name") or str(pid)
@@ -146,7 +267,7 @@ def main():
     for s in rp:
         if s in ("QB", "RB", "WR", "TE"):
             base_slots[s] = base_slots.get(s, 0) + 1
-    flex_slots = sum(1 for s in rp if "FLEX" in s)
+    flex_slots = count_flex_slots(rp)
     cutoff = {
         "QB": int(num_teams * (2.2 if is_sf else 1.3)),
         "RB": int(num_teams * 2.6),
@@ -187,6 +308,12 @@ def main():
           f"numTeams={num_teams}, ppr={ppr}")
     print(f"NFL Week {nfl_week} | trade deadline Week {trade_dl} "
           f"({max(trade_dl - nfl_week, 0)} wks left) | posture: {posture}")
+    print(f"Trade lock: trades legal through NFL Week {trade_dl} "
+          f"(lock = start of Week {trade_dl + 1}); "
+          f"trade review: {trade_review_days} day(s)")
+    if nfl_week == trade_dl and trade_review_days:
+        print(f"DEADLINE WEEK: deals must be ACCEPTED {trade_review_days}+ "
+              f"day(s) before the Week {trade_dl + 1} lock to clear review")
     if fp:
         print(f"FantasyPros rest-of-season ECR (week {fp_week}, "
               f"{len(fp)} players matched)")
@@ -270,7 +397,7 @@ def main():
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
         gap = abs(mine["val"] - theirs["val"]) / max(
             mine["val"], theirs["val"], 1)
-        delta, sits, starts = swap_delta(mine, theirs)
+        delta, sits, starts, _ = swap_delta(mine, theirs)
         tag = " [CREATES YOUR %s HOLE]" % mine["pos"] if hole else ""
         thin = " (thins %s)" % ("you" if mflag else "them") if mflag or tflag else ""
         fit = ""
@@ -305,10 +432,20 @@ def main():
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
-            f"{x['name']}({x['val']}){_btag(x)}" for x in pls))
+            f"{x['name']}({x['val']}){_btag(x)}"
+            + ("[ON-BLOCK: pending offer to %s]" % onblock[x["id"]]["partner"]
+               if x["id"] in onblock else "")
+            for x in pls))
     if me["ir"]:
         print(f"  IR: {', '.join(me['ir'])}")
     print()
+    if onblock:
+        print("=== PENDING OFFERS (your open offers — ON-BLOCK: never propose) ===")
+        for pid, info in onblock.items():
+            print(f"  {info['name']}: offered to {info['partner']} "
+                  f"on {info['date']}"
+                  + (f" ({info['notes']})" if info["notes"] else ""))
+        print()
 
     print("=== BYE WEEK AUDIT (FantasyPros) ===")
     if fp:
@@ -353,11 +490,13 @@ def main():
         print("  (skipped: no FantasyPros data)")
     print()
     # candidate 1-for-1s: your surplus -> their need, their surplus -> your need
-    print("=== CANDIDATE SWAPS (sorted by value gap) ===")
+    print("=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")
     print("  ranked by projected lineup-points delta for you; value gap shown "
           "for fairness; incoming must crack your projected starting lineup")
     my_need = need_score(me)
-    my_tradable = tradable(me)
+    _all_tradable = tradable(me)
+    my_tradable = [(x, f) for x, f in _all_tradable if x["id"] not in onblock]
+    n_blocked = len(_all_tradable) - len(my_tradable)
 
     def lineup_ids(bypos):
         """Your projected starting lineup, by FantasyCalc redraft value:
@@ -378,21 +517,49 @@ def main():
     my_lineup_val = sum(x["val"] for x in my_lineup)
     my_lineup_ids = {x["id"] for x in my_lineup}
 
+    def dval_for(x):
+        """FantasyCalc value with the E5 injury discount applied
+        (ADV-FF-10: stale values must not rank first)."""
+        st = (players.get(str(x["id"]), {}) or {}).get("injury_status") or ""
+        return x["val"] * injury_discount(st)
+
+    def disc_lineup(bypos):
+        return lineup_ids({p: [dict(x, val=dval_for(x)) for x in lst]
+                           for p, lst in bypos.items()})
+
+    my_lineup_dval = sum(x["val"] for x in disc_lineup(me["bypos"]))
+
     def swap_delta(mine, theirs):
-        """Lineup-points delta of the swap for you: who starts, who sits."""
-        new_bypos = {p: [x for x in lst if x["id"] != mine["id"]]
+        """Lineup-points delta of the swap for you: who starts, who sits.
+
+        Values are injury-discounted (E5/ADV-FF-10); a swap that would push
+        a bye week to 4+ projected starters is vetoed, 3 starters take a
+        20% penalty (completes E1/ADV-FF-15)."""
+        new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
+                         if x["id"] != mine["id"]]
                      for p, lst in me["bypos"].items()}
-        new_bypos.setdefault(theirs["pos"], []).append(dict(theirs))
+        new_bypos.setdefault(theirs["pos"], []).append(
+            dict(theirs, val=dval_for(theirs)))
         new_lineup = lineup_ids(new_bypos)
         new_ids = {x["id"] for x in new_lineup}
-        delta = sum(x["val"] for x in new_lineup) - my_lineup_val
+        delta = sum(x["val"] for x in new_lineup) - my_lineup_dval
+        bye_veto = False
+        tb = fp.get(theirs["id"], (None, None, None))[0]
+        if tb:
+            others = sum(1 for x in new_lineup if x["id"] != theirs["id"]
+                         and fp.get(x["id"], (None, None, None))[0] == tb)
+            if others >= 3:
+                bye_veto = True  # would push the bye week to 4+ starters
+            elif others == 2:
+                delta -= 0.20 * dval_for(theirs)  # 3-starter cluster penalty
         sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
         starts = [x["name"] for x in new_lineup
                   if x["id"] not in my_lineup_ids]
-        return delta, sits, starts
+        return delta, sits, starts, bye_veto
 
     rows = []
     dropped = 0
+    bye_dropped = 0
     for rid, st in teams.items():
         if rid == my_rid:
             continue
@@ -403,7 +570,12 @@ def main():
             for theirs, tflag in tradable(st):
                 if my_need.get(theirs["pos"], 0) <= 0:
                     continue  # you don't need it
-                delta = swap_delta(mine, theirs)[0]
+                delta, _, _, bye_veto = swap_delta(mine, theirs)
+                if bye_veto:
+                    # ADV-FF-15: incoming would push a bye week to 4+
+                    # projected starters — vetoed, not just tagged
+                    bye_dropped += 1
+                    continue
                 if delta <= 0:
                     # P5 fit veto: incoming can't crack his starting
                     # lineup, so equal calc value buys zero lineup gain.
@@ -417,9 +589,17 @@ def main():
     if dropped:
         print(f"  ({dropped} lateral swap(s) dropped: incoming player "
               f"couldn't crack your projected starting lineup)")
+    if bye_dropped:
+        print(f"  ({bye_dropped} swap(s) vetoed: incoming player would push "
+              f"a bye week to 4+ projected starters)")
+    if n_blocked:
+        print(f"  ({n_blocked} of your tradable player(s) ON-BLOCK: pending "
+              f"offer open, not proposed)")
     print()
     print("=== HOLE-CREATING OPTIONS (persona must price the roster cost) ===")
     for mine, mp in hole_creating(me):
+        if mine["id"] in onblock:
+            continue  # committed to a pending offer; not shoppable
         suitors = [st["name"] for rid, st in teams.items()
                    if rid != my_rid and need_score(st).get(mp, 0) > 0]
         if suitors:
@@ -433,6 +613,7 @@ def main():
     # wire is a different game by league size: an ocean in 4-team leagues
     # (replacement level is high, stream freely) and a desert in 14-team
     # leagues (only startable FAs at thin positions matter).
+    # WPOS (incl. K/DEF) and HURT live at module level (ADV-FF-06).
     print("=== WAIVER WIRE ===")
     if num_teams <= 6:
         print("  small league: wire is rich — stream QB/TE/K/DEF, drop freely, "
@@ -444,8 +625,6 @@ def main():
     for r in rosters:
         for pid in (r.get("players") or []) + (r.get("reserve") or []):
             rostered.add(str(pid))
-    WPOS = ("QB", "RB", "WR", "TE")
-    HURT = ("Out", "IR", "Doubtful", "Suspended")  # never suggest adding
     fa_by_pos = {}
     for pid, p in players.items():
         if not isinstance(p, dict):
@@ -462,10 +641,14 @@ def main():
             (v, p.get("full_name") or pid_s, inj, pid_s))
     for pos in WPOS:
         fa_by_pos.setdefault(pos, []).sort(reverse=True)
-        top = ", ".join(
-            f"{n}({fstr(pid_s, v)}){_btag({'id': pid_s})}"
-            + (f"[!{inj}]" if inj else "")
-            for v, n, inj, pid_s in fa_by_pos[pos][:4])
+        def _fa_fmt(v, n, inj, pid_s):
+            # K/DEF have no value feed (FantasyCalc omits them; Sleeper
+            # projections are empty) — label them unpriced, not zero.
+            val = fstr(pid_s, v) if (v or pos not in ("K", "DEF")) else "unpriced"
+            return (f"{n}({val}){_btag({'id': pid_s})}"
+                    + (f"[!{inj}]" if inj else ""))
+        top = ", ".join(_fa_fmt(v, n, inj, pid_s)
+                        for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
     try:
         trending = get(f"{SLEEPER}/players/nfl/trending/add"
@@ -496,18 +679,72 @@ def main():
         fav, fan, fainj, fapid = fa_by_pos[pos][0]
         if fav <= 0 or fainj in HURT:
             continue  # never suggest adding an injured player
+        if pos in ("K", "DEF"):
+            # ADV-FF-06: the natural drop for a K/DEF add is your current
+            # unit at that position, not a QB/RB/WR/TE bench player.
+            # No value feed prices K/DEF, so the value gate only fires if
+            # one ever appears; the fallback is a health signal — a hurt
+            # starter must be replaced from the top healthy FAs.
+            mine = sorted(me["bypos"].get(pos, []), key=lambda x: x["val"])
+            if mine and fav > mine[0]["val"] * CHURN_THRESHOLD:
+                sug.append((fav - mine[0]["val"], fav, mine[0]["val"], False,
+                            f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
+                            f"DROP {mine[0]['name']} ({pos},{mine[0]['val']})"))
+            elif mine and not fainj:
+                cur = mine[0]
+                cur_inj = ((players.get(cur["id"], {}) or {})
+                           .get("injury_status") or "")
+                if cur_inj in HURT:
+                    # forced replacement: a hurt starter must be replaced —
+                    # edge is 0 but NF-01 never flags a forced move
+                    sug.append((0, 0, cur["val"], True,
+                                f"  ADD {fan} ({pos}) / "
+                                f"DROP {cur['name']} ({pos}) — "
+                                f"your {pos} is {cur_inj}"))
+            continue
         for b in bench:
-            if fav > b["val"] * 1.1:
-                sug.append((fav - b["val"],
+            if fav > b["val"] * CHURN_THRESHOLD:
+                sug.append((fav - b["val"], fav, b["val"], False,
                             f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
                             f"DROP {b['name']} ({b['pos']},{b['val']})"))
                 break
-    sug.sort(reverse=True)
+    sug.sort(key=lambda t: t[0], reverse=True)
     print("  suggested moves:")
-    for _, line in sug[:5]:
+    for _, _, _, _, line in sug[:5]:
         print(line)
     if not sug:
         print("  (no FA beats your droppable bench)")
+    # --- NF-01: waiver priority cost ---
+    slot = waiver_slot(rosters, a.me)
+    print()
+    print("=== WAIVER PRIORITY COST ===")
+    if slot is None:
+        print("  (waiver slot unknown: Wesley's roster not found)")
+    else:
+        scarce = slot <= SCARCE_SLOT_CUTOFF
+        print(f"  {league.get('name')} waiver slot: {slot} of {num_teams}"
+              + (" — SCARCE" if scarce else ""))
+        v_edges = [e for e, _, _, forced, _ in sug if not forced]
+        typical = (sorted(v_edges)[len(v_edges) // 2] if v_edges
+                   else TYPICAL_EDGE_FALLBACK)
+        p, hv = hold_value(slot, num_teams, typical)
+        print("  hold-vs-spend: P(better target emerges before the Tuesday "
+              f"reset) = {p:.2f} x typical edge {typical:.1f} "
+              f"-> hold value {hv:.1f}")
+        print(f"    (P = {BASE_EMERGE} base x "
+              f"{slot_scarcity(slot, num_teams):.2f} slot scarcity x "
+              f"{wire_richness(num_teams):.1f} wire richness)")
+        if not sug:
+            print("  (no suggested moves to price)")
+        for edge, _, dropv, forced, line in sug[:5]:
+            verdict = slot_verdict(edge, dropv, slot, num_teams, forced)
+            if verdict:
+                print(f"{line}\n    -> {verdict}")
+            elif forced:
+                print(f"{line} (forced replacement: spend regardless)")
+            else:
+                print(f"{line} (edge {edge:.1f} vs hold {hv:.1f}: "
+                      "spend justified)")
     print()
     print("(Persona applies judgment on top: roster-context vetoes, "
           "both-sides motivation, market comps above.)")
