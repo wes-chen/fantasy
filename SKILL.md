@@ -35,7 +35,11 @@ lineup by FantasyCalc redraft value, not the smallest value gap —
 annotated with the value gap for fairness, bye weeks and bye-stack
 warnings, and exactly who starts and who sits after the deal; lateral
 swaps where the incoming player can't crack his projected starting
-lineup are dropped outright), hole-creating options it refuses to price
+lineup are dropped outright), a 2-for-1 consolidation section (E3 —
+4-team league only: two surplus pieces for one partner elite, ranked by
+lineup-points delta per freed roster slot, which refills from the wire
+in a 4-team league; 14-team boards never show it — depth is currency
+there), hole-creating options it refuses to price
 on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
 and who holds him: mine/free/opponent), and a waiver-wire section (top
 free agents by position on FantasyCalc redraft value, trending velocity
