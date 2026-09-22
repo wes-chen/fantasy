@@ -12,7 +12,10 @@ Usage:
   trade_board.py --league <league_id> --me <user_id>
                  [--players-cache ~/workspace/sleeper/players.json]
 """
-import argparse, json, os, re, sys, urllib.request
+import argparse, json, os, re, sys, time, urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fantasy_insights as fi  # G1-G10 analytics (pure functions + fetchers)
 
 SLEEPER = "https://api.sleeper.app/v1"
 FC = "https://api.fantasycalc.com/values/current"
@@ -239,6 +242,56 @@ def main():
     except Exception:
         fp, fp_week = {}, None
 
+    # --- nflverse bulk data: powers G1 (usage gaps), G5 (playoff SOS
+    # weighting) and G6 (handcuff map). Cached 24h; every consumer below
+    # degrades to a marked stub when the fetch fails. Route participation
+    # is unavailable in every free source — target share + air-yards
+    # share + snap% are the route proxies, never synthesized.
+    nfl_usage, pweight, nfl_depth, nfl_err, nvp = {}, {}, {}, None, {}
+    try:
+        nvp = fi.nflverse_paths(keys=("stats", "snaps", "games", "depth"))
+        nfl_usage = fi.load_usage(nvp["stats"], nvp["snaps"])
+        _pstart = (league.get("settings") or {}).get("playoff_week_start") or 15
+        _pteams = {k: (v["team"], v["pos"]) for k, v in nfl_usage.items()}
+        pweight = fi.playoff_multipliers(nvp["games"], nvp["stats"], _pteams,
+                                         tuple(range(_pstart, 19)))
+        nfl_depth = fi.parse_depth_charts(nvp["depth"])
+    except Exception as e:  # noqa: BLE001 - degraded paths below
+        nfl_err = str(e)[:140]
+
+    nkey_to_sid = {}  # (norm name, team, pos) -> sleeper id
+    for _sid, _p in players.items():
+        if isinstance(_p, dict) and _p.get("full_name"):
+            nkey_to_sid[(norm_name(_p["full_name"]), _p.get("team"),
+                         _p.get("position"))] = str(_sid)
+    _by_np = {}  # fallback: (norm name, pos) -> sleeper id (team-agnostic)
+    for _nk, _sid in nkey_to_sid.items():
+        _by_np.setdefault((_nk[0], _nk[2]), _sid)
+
+    def nkey_of_pid(pid):
+        _p = players.get(str(pid), {})
+        if not isinstance(_p, dict):
+            return ("", "", "")
+        return (norm_name(_p.get("full_name")), _p.get("team"),
+                _p.get("position"))
+
+    def sid_of_nkey(nkey):
+        return nkey_to_sid.get(nkey) or _by_np.get((nkey[0], nkey[2]))
+
+    # G5: playoff-schedule value multiplier, active from Week 5 (the point
+    # in the season clock where playoff weeks start mattering in deals).
+    pw_active = nfl_week >= 5 and bool(pweight)
+
+    def pw_of(pid):
+        if not pw_active:
+            return 1.0
+        return pweight.get(nkey_of_pid(pid), (1.0, ""))[0]
+
+    def ptag_of(pid):
+        if not pw_active:
+            return ""
+        return pweight.get(nkey_of_pid(pid), (1.0, ""))[1]
+
     def ftrend(sid):
         return fval.get(str(sid), (0, 999, 999, 0))[3]
 
@@ -301,6 +354,15 @@ def main():
                                  rs.get("ties") or 0),
                       "pf": pf, "poss": poss}
 
+    # roster-wide ownership (computed once; used by G1/G3/G6/G8)
+    rostered = set()
+    owner_of = {}
+    for r in rosters:
+        _rid = str(r["roster_id"])
+        for pid in (r.get("players") or []) + (r.get("reserve") or []):
+            rostered.add(str(pid))
+            owner_of[str(pid)] = _rid
+
     # --- trade history (market comps) ---
     print(f"LEAGUE: {league.get('name')} | {num_teams} teams | "
           f"{'Superflex' if is_sf else '1-QB'} | PPR {ppr}")
@@ -322,6 +384,7 @@ def main():
     print()
     print("=== LEAGUE TRADE HISTORY (market comps) ===")
     ntrades = 0
+    all_trades = []  # G2: mined for manager trade profiles below
     for rnd in range(1, 19):
         try:
             txns = get(f"{SLEEPER}/league/{a.league}/transactions/{rnd}")
@@ -332,6 +395,10 @@ def main():
                 continue
             ntrades += 1
             adds, drops = t.get("adds") or {}, t.get("drops") or {}
+            all_trades.append({
+                "round": rnd,
+                "adds": {str(k): str(v) for k, v in adds.items()},
+                "drops": {str(k): str(v) for k, v in drops.items()}})
             # adds: player_id -> roster_id receiving
             recv = {}
             for pid, rid in adds.items():
@@ -352,6 +419,20 @@ def main():
                       f"({abs(v0-v1)/big:.0%} gap)")
     if not ntrades:
         print("  (no completed trades yet)")
+    print()
+    print("=== MANAGER TRADE PROFILES (G2: mined from this league's deals) ===")
+    try:
+        _profs = fi.trade_profiles(
+            all_trades, ppos,
+            lambda pid: fval.get(str(pid), (0,))[0],
+            {str(k): v for k, v in rid2name.items()})
+        if not _profs:
+            print("  (no completed trades yet — profiles appear after "
+                  "the first deal)")
+        for _rid in sorted(_profs, key=lambda r: -_profs[r]["n_trades"])[:8]:
+            print("  " + fi.profile_line(_profs[_rid]))
+    except Exception as e:  # noqa: BLE001 - never break the board
+        print(f"  (unavailable: {str(e)[:100]})")
     print()
 
     # --- team-by-team needs/surplus ---
@@ -425,14 +506,59 @@ def main():
               f" PF {st['pf']:.0f} poss {st['poss']:.0f}{tag}")
     print("  (!) = thin: no startable depth behind the starters")
     print()
+    print("=== PLAYOFF ODDS + SCHEDULE LUCK (G4/G7: weekly snapshot) ===")
+    try:
+        _pop = os.path.join(fi.GOAL_DIR, "hidden_files", "playoff-odds.md")
+        _age = (time.time() - os.stat(_pop).st_mtime) / 3600
+        if _age > 72:
+            raise FileNotFoundError("stale snapshot")
+        _txt = open(_pop).read().splitlines()
+        _in, _shown = False, 0
+        for _ln in _txt:
+            if _ln.startswith("## "):
+                _in = (league.get("name", "") in _ln)
+                continue
+            if _in and ("Wesley playoff probability" in _ln
+                        or "<-- YOU" in _ln):
+                print("  " + _ln.replace(" <-- YOU", ""))
+                _shown += 1
+        if not _shown:
+            print("  (snapshot has no section for this league yet)")
+    except Exception:  # noqa: BLE001 - degraded, never fatal
+        print("  (snapshot missing/stale — run: python3 "
+              "bin/fantasy_insights.py playoff-odds --league <id> "
+              "--me <you> --out <goal>/hidden_files/playoff-odds.md)")
+    print()
 
     # --- your chips & needs ---
     me = teams[my_rid]
+
+    def lineup_ids(bypos):
+        """Your projected starting lineup, by FantasyCalc redraft value:
+        fill base slots first, then flex slots with the best remaining
+        RB/WR/TE (superflex is covered by the 2 QB base slots)."""
+        used, starters = set(), []
+        for pos in ("QB", "RB", "WR", "TE"):
+            for x in sorted(bypos.get(pos, []),
+                            key=lambda x: -x["val"])[:eff_slots[pos]]:
+                used.add(x["id"])
+                starters.append(x)
+        pool = [x for pos in ("RB", "WR", "TE") for x in bypos.get(pos, [])
+                if x["id"] not in used]
+        pool.sort(key=lambda x: -x["val"])
+        return starters + pool[:flex_slots]
+
+    my_lineup = lineup_ids(me["bypos"])
+    my_lineup_val = sum(x["val"] for x in my_lineup)
+    my_lineup_ids = {x["id"] for x in my_lineup}
     print("=== YOUR ROSTER (by value) ===")
+    if pw_active:
+        print("  [P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal — "
+              "values below are playoff-weighted x0.9-1.1")
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
-            f"{x['name']}({x['val']}){_btag(x)}"
+            f"{x['name']}({x['val']}){_btag(x)}{ptag_of(x['id'])}"
             + ("[ON-BLOCK: pending offer to %s]" % onblock[x["id"]]["partner"]
                if x["id"] in onblock else "")
             for x in pls))
@@ -465,6 +591,26 @@ def main():
     else:
         print("  (skipped: no FantasyPros data)")
     print()
+    print("=== BYE-CRATER FORECAST (G9: next 4 weeks) ===")
+    try:
+        if not fp:
+            raise RuntimeError("no FantasyPros data")
+        _byes = {sid: v[0] for sid, v in fp.items() if v[0]}
+        _my_ids = [x["id"] for lst in me["bypos"].values() for x in lst]
+        _sid2name = {x["id"]: x["name"] for lst in me["bypos"].values()
+                     for x in lst}
+        _craters = fi.bye_craters(_byes, _my_ids, my_lineup_ids, nfl_week)
+        for _wk in sorted(_craters):
+            _c = _craters[_wk]
+            _sn = [_sid2name.get(s, s) for s in _c["starters"]]
+            _flag = "  <-- CRATER (2+ starters out)" if _c["crater"] else ""
+            _who = f": {', '.join(_sn)}" if _sn else ""
+            _sl = "starter" if len(_sn) == 1 else "starters"
+            print(f"  W{_wk}: {_c['total']} of yours on bye "
+                  f"({len(_sn)} {_sl}{_who}){_flag}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  (unavailable: {str(e)[:100]})")
+    print()
     print("=== VALUE DIVERGENCE (FantasyPros ECR rank vs FantasyCalc rank) ===")
     if fp:
         divs = []
@@ -489,39 +635,64 @@ def main():
     else:
         print("  (skipped: no FantasyPros data)")
     print()
+    print("=== USAGE-GAP RADAR (G1: nflverse usage vs fantasy output) ===")
+    print("  routes are unavailable in every free source — target share + "
+          "air-yards share + snap% are the route proxies, never synthesized")
+    buy_low_sids = set()  # stashed for the G8 clog audit
+    try:
+        if nfl_err or not nfl_usage:
+            raise RuntimeError(nfl_err or "no usage rows")
+        _buys, _sells = fi.usage_gaps(nfl_usage)
+        _my = {x["id"] for lst in me["bypos"].values() for x in lst}
+        buy_low_sids = {sid_of_nkey(b["nkey"]) for b in _buys}
+        buy_low_sids.discard(None)
+        _hold = [b for b in _buys if sid_of_nkey(b["nkey"]) in _my][:4]
+        _shop = [s for s in _sells if sid_of_nkey(s["nkey"]) in _my][:4]
+        _tgt, _wire = [], []
+        for b in _buys:
+            _sid = sid_of_nkey(b["nkey"])
+            if _sid in _my or not _sid:
+                continue
+            (_tgt if _sid in rostered else _wire).append(b)
+        def _u1(b):
+            return (f"{b['name']} ({b['pos']},{b['team']}) "
+                    f"usage-implied {b['exp']} vs actual {b['ppg']} "
+                    f"(gap {b['gap']:+.1f}, {b['note']})")
+        if _hold:
+            print("  HOLD (yours, positive regression due): "
+                  + "; ".join(_u1(b) for b in _hold))
+        if _shop:
+            print("  SHOP (yours, sell the TD luck): "
+                  + "; ".join(_u1(s) for s in _shop))
+        for b in _tgt[:4]:
+            _sid = sid_of_nkey(b["nkey"])
+            _mgr = rid2name.get(int(owner_of.get(_sid, -1)), "?")
+            print(f"  TARGET (buy the usage from {_mgr}): {_u1(b)}")
+        if _wire[:3]:
+            print("  WIRE (free agents, buy the usage): "
+                  + "; ".join(_u1(b) for b in _wire[:3]))
+        if not (_hold or _shop or _tgt or _wire):
+            print("  (no major usage gaps this week)")
+    except Exception as e:  # noqa: BLE001
+        print(f"  (unavailable this run: {str(e)[:110]})")
+    print()
     # candidate 1-for-1s: your surplus -> their need, their surplus -> your need
     print("=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")
     print("  ranked by projected lineup-points delta for you; value gap shown "
           "for fairness; incoming must crack your projected starting lineup")
+    if pw_active:
+        print("  G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)")
     my_need = need_score(me)
     _all_tradable = tradable(me)
     my_tradable = [(x, f) for x, f in _all_tradable if x["id"] not in onblock]
     n_blocked = len(_all_tradable) - len(my_tradable)
 
-    def lineup_ids(bypos):
-        """Your projected starting lineup, by FantasyCalc redraft value:
-        fill base slots first, then flex slots with the best remaining
-        RB/WR/TE (superflex is covered by the 2 QB base slots)."""
-        used, starters = set(), []
-        for pos in ("QB", "RB", "WR", "TE"):
-            for x in sorted(bypos.get(pos, []),
-                            key=lambda x: -x["val"])[:eff_slots[pos]]:
-                used.add(x["id"])
-                starters.append(x)
-        pool = [x for pos in ("RB", "WR", "TE") for x in bypos.get(pos, [])
-                if x["id"] not in used]
-        pool.sort(key=lambda x: -x["val"])
-        return starters + pool[:flex_slots]
-
-    my_lineup = lineup_ids(me["bypos"])
-    my_lineup_val = sum(x["val"] for x in my_lineup)
-    my_lineup_ids = {x["id"] for x in my_lineup}
-
     def dval_for(x):
         """FantasyCalc value with the E5 injury discount applied
-        (ADV-FF-10: stale values must not rank first)."""
+        (ADV-FF-10: stale values must not rank first) and the G5
+        playoff-schedule weight (x0.9-1.1 from Week 5)."""
         st = (players.get(str(x["id"]), {}) or {}).get("injury_status") or ""
-        return x["val"] * injury_discount(st)
+        return x["val"] * injury_discount(st) * pw_of(x["id"])
 
     def disc_lineup(bypos):
         return lineup_ids({p: [dict(x, val=dval_for(x)) for x in lst]
@@ -608,6 +779,51 @@ def main():
                   f"trading him leaves you with "
                   f"{me['startable'].get(mp, 0) - 1} startable {mp}")
     print()
+    print("=== HANDCUFF LEVERAGE MAP (G6: each of your RBs' direct backup) ===")
+    hm_cache = []  # stashed for the G8 clog audit
+    try:
+        if not nfl_depth:
+            raise RuntimeError(nfl_err or "empty depth chart")
+        _my_rbs = [x["id"] for x in me["bypos"].get("RB", [])]
+        _rids = {str(k): v for k, v in rid2name.items()}
+        _rost_ids = {str(r["roster_id"]):
+                     [str(p) for p in (r.get("players") or [])]
+                     for r in rosters}
+        hm_cache = fi.handcuff_map(nfl_depth, _my_rbs, _rost_ids, players,
+                                   _rids, my_rid)
+        if not hm_cache:
+            print("  (no RBs on your roster)")
+        for h in hm_cache:
+            if h["lead"]:
+                _backs = ", ".join(
+                    f"{b['name']} [{b['status']}]" for b in h["backups"])
+                _flag = ("  <-- UNPROTECTED"
+                         if any(b["status"] == "free" for b in h["backups"])
+                         else "")
+                print(f"  {h['starter']} ({h['team']} RB1): "
+                      f"backup {_backs or '(no listed backup)'}{_flag}")
+            else:
+                print(f"  {h['starter']}: {h.get('note') or 'no data'}")
+    except Exception as e:  # noqa: BLE001 - snap-share fallback, then stub
+        _fb = []
+        try:
+            for _x in me["bypos"].get("RB", [])[:6]:
+                _t = (players.get(_x["id"], {}) or {}).get("team")
+                if _t and nvp.get("snaps"):
+                    _fb.append((_x["name"], _t,
+                                fi.infer_backups_from_snaps(nvp["snaps"],
+                                                            _t)))
+        except Exception:  # noqa: BLE001
+            _fb = []
+        if _fb:
+            print("  (depth-chart source thin — backups INFERRED from "
+                  "snap share, not a real depth chart)")
+            for _nm, _t, _backs in _fb:
+                print(f"  {_nm} ({_t}): "
+                      + ", ".join(f"{n} ({s} snaps/g)" for n, s, _ in _backs))
+        else:
+            print(f"  (unavailable: {str(e)[:100]})")
+    print()
     # --- waiver wire ---
     # Free agents ranked by settings-matched FantasyCalc value, because the
     # wire is a different game by league size: an ocean in 4-team leagues
@@ -621,10 +837,6 @@ def main():
     else:
         print("  deep league: wire is thin — only startable FAs at thin "
               "positions matter; never drop a startable asset")
-    rostered = set()
-    for r in rosters:
-        for pid in (r.get("players") or []) + (r.get("reserve") or []):
-            rostered.add(str(pid))
     fa_by_pos = {}
     for pid, p in players.items():
         if not isinstance(p, dict):
@@ -650,24 +862,28 @@ def main():
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
                         for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
+    # G3: trending velocity — one polite call per lookback window
+    # (24/48/168h); HEATING = adds accelerating vs the 7d rate.
     try:
-        trending = get(f"{SLEEPER}/players/nfl/trending/add"
-                       "?lookback_hours=24&limit=25")
+        _windows = fi.fetch_trending_windows()
     except Exception:
-        trending = []
+        _windows = {}
     tfa = []
-    for t in trending:
-        pid = str(t.get("player_id"))
-        if pid in rostered:
+    for _row in fi.trending_velocity(_windows, players, rostered):
+        if _row["pos"] not in WPOS:
             continue
-        p = players.get(pid, {})
-        if p.get("position") not in WPOS:
-            continue
-        v = fval.get(pid, (0, 999, 999, 0))[0]
-        inj = p.get("injury_status") or ""
-        tfa.append(f"{p.get('full_name') or pid}({fstr(pid, v)},+{t.get('count')})"
-                   + (f"[!{inj}]" if inj in HURT else ""))
-    print(f"  trending FA adds (24h): {', '.join(tfa) or '(none)'}")
+        _pid = _row["sid"]
+        v = fval.get(_pid, (0, 999, 999, 0))[0]
+        inj = (players.get(_pid, {}) or {}).get("injury_status") or ""
+        _vel = (f"x{_row['accel']} vs {_row['base']} {_row['tag']}"
+                if _row["accel"] is not None else "NEW")
+        tfa.append(
+            f"{_row['name']}({fstr(_pid, v)},+{_row['c24']}/24h,{_vel})"
+            + (f"[!{inj}]" if inj in HURT else ""))
+        if len(tfa) >= 8:
+            break
+    print(f"  trending velocity (Sleeper-wide adds, 24h vs baseline): "
+          f"{', '.join(tfa) if tfa else '(unavailable this run)'}")
     bench = []
     for p in eff_slots:
         bench.extend(me["bypos"].get(p, [])[eff_slots[p]:])
@@ -714,6 +930,44 @@ def main():
         print(line)
     if not sug:
         print("  (no FA beats your droppable bench)")
+    print("  roster-clog audit (G8: bench by contingent value, low = droppable):")
+    try:
+        _ball = []
+        for _pos, _lst in me["bypos"].items():
+            if _pos not in ("QB", "RB", "WR", "TE", "K", "DEF"):
+                continue
+            for _b in _lst:
+                if _b["id"] in my_lineup_ids:
+                    continue  # starters aren't clog
+                _bp = players.get(_b["id"], {}) or {}
+                _ball.append({"sid": _b["id"], "name": _b["name"],
+                              "pos": _b["pos"], "val": _b["val"],
+                              "inj": _bp.get("injury_status") or ""})
+        _hcuff = {b["sid"] for h in hm_cache for b in h["backups"]
+                  if b.get("status") == "mine" and b.get("sid")}
+        _ahead = {}
+        for _b in _ball:
+            for _s in my_lineup:
+                if _s["pos"] == _b["pos"] and _s["val"] > _b["val"]:
+                    _si = ((players.get(_s["id"], {}) or {})
+                           .get("injury_status") or "")
+                    if _si in HURT:
+                        _ahead[_b["sid"]] = True
+                        break
+        _ranked, _drops = fi.clog_audit(
+            _ball, handcuff_of=_hcuff, ahead_out=_ahead,
+            rising={s: True for s in buy_low_sids},
+            onblock=set(onblock))
+        for _r in _ranked[:6]:
+            _tags = ("[handcuff]" if _r["sid"] in _hcuff else "") + \
+                    ("[ahead-out]" if _r["sid"] in _ahead else "") + \
+                    ("[rising]" if _r["sid"] in buy_low_sids else "")
+            print(f"    {_r['name']} ({_r['pos']},{_r['val']} -> "
+                  f"contingent {_r['contingent']}){_tags}")
+        if _drops:
+            print(f"    DROP CANDIDATES: {', '.join(_drops)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"    (unavailable: {str(e)[:100]})")
     # --- NF-01: waiver priority cost ---
     slot = waiver_slot(rosters, a.me)
     print()
