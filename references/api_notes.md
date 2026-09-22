@@ -14,12 +14,16 @@
   roster_id. `drops` mirrors it.
 - Players DB: `GET https://api.sleeper.app/v1/players/nfl` (~15MB).
   Cache it (Sleeper asks you to); refresh weekly. Keys are Sleeper IDs.
-- Trending: `GET /v1/players/nfl/trending/add?lookback_hours={24,48,168}&limit=25`
+- Trending: `GET /v1/players/nfl/trending/add?lookback_hours=24&limit=25`
   (Sleeper-WIDE add counts across all leagues, not league-specific —
   a proxy for waiver urgency, never presented as his league's adds).
-  G3 velocity = 24h adds/hour vs the 48h/168h baseline per player
-  (168h preferred; 48h fallback; absent from both → NEW, never faked).
-  One call per window per scan, 1s apart.
+  G3 velocity = this scan's 24h adds vs the 24h adds ending at the
+  previous scan (both trailing-24h windows, so the ratio is clean;
+  a baseline less than an hour old is too overlapping to use).
+  Snapshots persisted at `hidden_files/trending_snapshots.json` (kept
+  after every successful scan). No usable baseline, or player absent
+  from it (or at zero there) → NEW (never faked). **Exactly one
+  trending call per scan** (standing rule).
 
 ## nflverse (bulk CSVs, no auth — verified 2026-09-22)
 
@@ -40,7 +44,13 @@ marked stub when the fetch fails.
   duplicates). Powers G6 handcuff map.
 - Schedules: release `schedules`, file `games.csv.gz` (NOT
   `sched_2026.csv` — that path 404s). Carries ESPN event IDs per game.
-  Powers G5 (W15-17 opponents).
+  Powers G5 (W15-17 opponents) and G10 (weekly event IDs).
+  TWO GOTCHAS (both were real bugs): the regular-season column is
+  `game_type`, not `season_type` (player_stats uses `season_type`);
+  and the file spans 1999-present, so every reader filters
+  `season == "2026"` — unfiltered reads blend 28 years of slates.
+  Bye detection uses the fixed 32-team NFL set; a playoff week with no
+  schedule rows is UNSUPPORTED (marked neutral), never 32 phantom byes.
 
 HARD LIMIT: route participation is in NONE of the free sources
 (nflverse, PFR, FTN). Never synthesize it — target share + air-yards
