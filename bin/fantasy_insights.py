@@ -10,7 +10,8 @@ with a 24h TTL.
 Feature map:
   G1 usage-gap radar        usage_gaps()        <- nflverse stats+snap counts
   G2 manager trade profiles trade_profiles()    <- Sleeper transactions
-  G3 trending velocity      trending_velocity() <- Sleeper trending/add x3
+  G3 trending velocity      trending_velocity() <- ONE Sleeper trending/add
+       call per scan; velocity derived from timestamped snapshot history
   G4 playoff-odds Monte Carlo simulate_playoffs() <- records + schedules
   G5 playoff-week weighting playoff_multipliers() <- nflverse games.csv + defense
   G6 handcuff leverage map  handcuff_map()      <- nflverse depth charts
@@ -162,7 +163,7 @@ def load_usage(stats_gz, snaps_csv):
     opener = gzip.open if str(stats_gz).endswith(".gz") else open
     with opener(stats_gz, "rt") as fh:
         for r in csv.DictReader(fh):
-            if r.get("season_type") != "REG":
+            if not _reg_game_row(r):
                 continue
             pos = r.get("position")
             if pos not in ("QB", "RB", "WR", "TE"):
@@ -191,7 +192,7 @@ def load_usage(stats_gz, snaps_csv):
             a["pos"] = pos
     with open(snaps_csv) as fh:
         for r in csv.DictReader(fh):
-            if r.get("game_type") != "REG":
+            if not _reg_game_row(r):
                 continue
             pos = r.get("position")
             if pos not in ("QB", "RB", "WR", "TE"):
@@ -357,73 +358,125 @@ def profile_line(p):
 
 # ---------------------------------------------------------------- G3 trending velocity
 
-# Sleeper trending/add counts are cumulative adds over the lookback window.
-# Velocity = adds-per-hour now (24h) vs adds-per-hour over the week (168h).
-G3_LOOKBACKS = (24, 48, 168)
-G3_HEATING = 2.0   # 24h rate >= 2x the 168h rate
-G3_COOLING = 0.5   # 24h rate <= half the 168h rate
+# Wesley's rule: exactly ONE Sleeper call per scan. Velocity is derived
+# from our own timestamped snapshot history, not from extra lookback
+# windows — the previous three-window design made 3 calls per scan.
+G3_HEATING = 2.0   # trailing-24h adds >= 2x the previous scan's 24h
+G3_COOLING = 0.5   # trailing-24h adds <= half the previous scan's 24h
+G3_SNAP_PATH = os.path.join(GOAL_DIR, "hidden_files",
+                            "trending_snapshots.json")
+G3_MAX_SNAPS = 40
 
 
-def fetch_trending_windows():
-    """One polite call per lookback window (24/48/168h). Returns
-    {hours: [{player_id, count}]}. Raises on failure."""
-    out = {}
-    for hrs in G3_LOOKBACKS:
-        out[hrs] = fetch_json(
-            f"{SLEEPER}/players/nfl/trending/add"
-            f"?lookback_hours={hrs}&limit=25")
-        time.sleep(1)  # rate-limit politely: one call per window per scan
-    return out
+def fetch_trending():
+    """The single allowed trending call per scan: 24h add counts.
 
-
-def trending_velocity(windows, players, rostered):
-    """Classify free-agent add velocity.
-
-    windows: {24: [...], 48: [...], 168: [...]} of {player_id, count}
-    (Sleeper-wide adds, not league-specific). Returns [{sid, name, pos,
-    c24, accel, base, tag}] for UNROSTERED players, tag in {NEW, HEATING,
-    COOLING, STEADY}, new/heating first. accel = (adds/hour over 24h) /
-    (adds/hour over the baseline window); the baseline is 168h when the
-    player appears there, else 48h. A player in neither baseline window
-    is NEW (no honest acceleration exists — never faked with a 999).
+    Returns the raw Sleeper list [{player_id, count}]. Raises on failure —
+    the caller prints a marked degraded line, never fakes velocity.
     """
-    by_id = {}
-    for hrs, rows in windows.items():
-        for t in rows or []:
-            pid = str(t.get("player_id"))
-            by_id.setdefault(pid, {})[hrs] = t.get("count") or 0
+    return fetch_json(
+        f"{SLEEPER}/players/nfl/trending/add?lookback_hours=24&limit=25")
+
+
+def load_trend_snapshots(path=G3_SNAP_PATH):
+    """[ {ts, counts} ] oldest-first; [] when none exist (never crashes)."""
+    try:
+        with open(path) as fh:
+            snaps = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    return [s for s in snaps
+            if isinstance(s, dict) and "ts" in s and "counts" in s]
+
+
+def save_trend_snapshot(counts, ts=None, path=G3_SNAP_PATH):
+    """Append {ts, counts} to the snapshot history (atomic, capped).
+
+    Returns the full history list. Call AFTER a successful scan so the
+    next scan has a baseline to measure velocity against.
+    """
+    snaps = load_trend_snapshots(path)
+    snaps.append({"ts": ts if ts is not None else time.time(),
+                  "counts": counts})
+    snaps = snaps[-G3_MAX_SNAPS:]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(snaps, fh)
+    os.replace(tmp, path)
+    return snaps
+
+
+def trending_velocity(current, prev, players, rostered):
+    """Classify free-agent add velocity from snapshot history.
+
+    current: {pid: adds over the last 24h} — this scan's single call.
+    prev: the most recent prior snapshot {ts, counts} or None.
+    accel = (adds over the trailing 24h now) / (adds over the trailing
+    24h ending at the previous scan) — both windows are trailing-24h, so
+    the ratio is a clean velocity read with no window-size math. A prior
+    snapshot less than an hour old overlaps too much to be a baseline;
+    no prior snapshot, or the player absent from it (or at zero there),
+    -> NEW. No honest acceleration exists there and one is never faked.
+    Returns [{sid, name, pos, c24, accel, base, tag}], tag in {NEW,
+    HEATING, COOLING, STEADY}, new/heating first.
+    """
+    gap_h = None
+    if prev:
+        try:
+            gap_h = (time.time() - float(prev["ts"])) / 3600.0
+        except (TypeError, ValueError):
+            gap_h = None
+    prev_counts = (prev or {}).get("counts") or {}
+    baseline_ok = gap_h is not None and gap_h >= 1.0
     out = []
-    for pid, counts in by_id.items():
+    for pid, c24 in (current or {}).items():
         if pid in rostered:
             continue
         p = players.get(pid, {}) if isinstance(players, dict) else {}
         pos = (p.get("position") or "?") if isinstance(p, dict) else "?"
-        c24 = counts.get(24, 0)
-        rate24 = c24 / 24.0
-        base_h, base_rate = None, 0.0
-        for hrs in (168, 48):
-            if counts.get(hrs):
-                base_h, base_rate = hrs, counts[hrs] / float(hrs)
-                break
-        if base_h and base_rate > 0:
-            accel = round(rate24 / base_rate, 2)
-            base = f"{base_h}h"
+        prev_c = prev_counts.get(pid)
+        if (baseline_ok and prev_c is not None
+                and float(prev_c) > 0 and (c24 or 0) > 0):
+            accel = round(float(c24) / float(prev_c), 2)
+            base = f"prev {gap_h:.0f}h"
             if accel >= G3_HEATING:
                 tag = "HEATING"
             elif accel <= G3_COOLING:
                 tag = "COOLING"
             else:
                 tag = "STEADY"
+        elif (baseline_ok and prev_c is not None and float(prev_c) > 0
+                and not (c24 or 0)):
+            accel, base, tag = 0.0, f"prev {gap_h:.0f}h", "COOLING"
         else:
             accel, base, tag = None, "—", "NEW"
         out.append({"sid": pid,
                     "name": (p.get("full_name") or pid)
                     if isinstance(p, dict) else pid,
-                    "pos": pos, "c24": c24,
+                    "pos": pos, "c24": c24 or 0,
                     "accel": accel, "base": base, "tag": tag})
     _rank = {"NEW": 0, "HEATING": 1, "STEADY": 2, "COOLING": 3}
     out.sort(key=lambda d: (_rank[d["tag"]], -(d["accel"] or 0), -d["c24"]))
     return out
+
+
+def _reg_game_row(r):
+    """True for regular-season rows in both nflverse layouts.
+
+    games.csv (schedules) uses `game_type`; player_stats uses
+    `season_type`. Checking both is what makes the playoff-schedule
+    and ESPN-game readers see the schedule at all.
+    """
+    return (r.get("season_type") or r.get("game_type")) == "REG"
+
+
+# Fixed 2026 NFL team universe. load_playoff_opponents must NOT derive the
+# universe from the data: a playoff week missing from the file would turn
+# into 32 phantom byes. Weeks with no schedule rows are unsupported.
+NFL_TEAMS = frozenset(
+    "ARI ATL BAL BUF CAR CHI CIN CLE DAL DEN DET GB HOU IND JAX KC LV LAC "
+    "LAR MIA MIN NE NO NYG NYJ PHI PIT SF SEA TB TEN WAS".split())
 
 
 # ---------------------------------------------------------------- G4 playoff-odds Monte Carlo
@@ -528,15 +581,22 @@ def posture_for(prob):
 
 # ---------------------------------------------------------------- G5 playoff-week schedule weighting
 
-def load_playoff_opponents(games_gz, playoff_weeks):
-    """{(team): [(week, opp_or_None)]} for playoff weeks from nflverse
-    games.csv. opp None = bye that week (devastating in a playoff week).
+def load_playoff_opponents(games_gz, playoff_weeks, season="2026"):
+    """{(team): [(week, opp_or_None)]} + [playoff weeks with no schedule rows].
+
+    opp None = bye that week (devastating in a playoff week). Rows are
+    filtered to `season` — the cached games.csv spans 1999-2026 and mixing
+    seasons blends 28 years of slates into one. The team universe is the
+    fixed 32-team NFL set, never the teams seen in the file — deriving it
+    from data turns a missing week into 32 phantom byes. A playoff week
+    with no schedule rows is returned as unsupported; the caller must
+    degrade for it, never claim byes.
     """
     opps, played = {}, {}
     opener = gzip.open if str(games_gz).endswith(".gz") else open
     with opener(games_gz, "rt") as fh:
         for r in csv.DictReader(fh):
-            if r.get("season_type") != "REG":
+            if not _reg_game_row(r) or str(r.get("season") or "") != season:
                 continue
             try:
                 wk = int(r.get("week") or 0)
@@ -550,13 +610,14 @@ def load_playoff_opponents(games_gz, playoff_weeks):
             opps.setdefault(a, []).append((wk, h))
             opps.setdefault(h, []).append((wk, a))
             played.setdefault(wk, set()).update((a, h))
-    # byes: teams idle in a playoff week
-    all_teams = {t for wk in played for t in played[wk]}
+    missing = [wk for wk in playoff_weeks if not played.get(wk)]
     for wk in playoff_weeks:
-        idle = all_teams - played.get(wk, set())
+        if wk in missing:
+            continue  # unsupported week: no bye claims, period
+        idle = NFL_TEAMS - played[wk]
         for t in idle:
             opps.setdefault(t, []).append((wk, None))
-    return opps
+    return opps, missing
 
 
 def defensive_strength(stats_gz):
@@ -570,7 +631,7 @@ def defensive_strength(stats_gz):
     opener = gzip.open if str(stats_gz).endswith(".gz") else open
     with opener(stats_gz, "rt") as fh:
         for r in csv.DictReader(fh):
-            if r.get("season_type") != "REG":
+            if not _reg_game_row(r):
                 continue
             pos = r.get("position")
             if pos not in ("QB", "RB", "WR", "TE"):
@@ -596,9 +657,18 @@ def playoff_multipliers(games_gz, stats_gz, player_teams, playoff_weeks):
 
     player_teams: {nkey: (team, pos)}. mult in [0.9, 1.1]: 1.1 = softest
     playoff schedule at the position, 0.9 = toughest. A bye in a playoff
-    week forces 0.85 and a [PLAYOFF BYE] tag.
+    week forces 0.85 and a [PLAYOFF BYE] tag. When a playoff week has no
+    schedule rows the SOS is unsupported — every player gets a marked
+    neutral (never a phantom bye, never a silent 1.0).
     """
-    opps = load_playoff_opponents(games_gz, playoff_weeks)
+    opps, missing = load_playoff_opponents(games_gz, playoff_weeks)
+    out = {}
+    if missing:
+        tag = ("[G5 SOS unavailable: W{} schedule missing]"
+               .format("+W".join(str(w) for w in missing)))
+        for nkey in player_teams:
+            out[nkey] = (1.0, tag)
+        return out
     allowed = defensive_strength(stats_gz)
     # percentile rank of each defense per position (0 = toughest)
     by_pos = {}
@@ -610,7 +680,6 @@ def playoff_multipliers(games_gz, stats_gz, player_teams, playoff_weeks):
         n = max(len(srt) - 1, 1)
         for i, (_, d) in enumerate(srt):
             pct[(d, pos)] = i / n
-    out = {}
     for nkey, (team, pos) in player_teams.items():
         if pos not in ("QB", "RB", "WR", "TE") or not team:
             out[nkey] = (1.0, "")
@@ -741,7 +810,7 @@ def infer_backups_from_snaps(snaps_csv, team):
     tot, n = {}, {}
     with open(snaps_csv) as fh:
         for r in csv.DictReader(fh):
-            if (r.get("game_type") != "REG" or r.get("team") != team
+            if (not _reg_game_row(r) or r.get("team") != team
                     or r.get("position") != "RB"):
                 continue
             nm = r.get("player")
@@ -898,13 +967,15 @@ def parse_odds_item(item, away, home):
                          or "unknown")}
 
 
-def fetch_week_odds(games_gz, nfl_week):
+def fetch_week_odds(games_gz, nfl_week, season="2026"):
     """DraftKings game odds for every game of an NFL week.
 
-    Event IDs come from nflverse games.csv (espn column); pricing from the
-    ESPN core API odds endpoint (undocumented, game-level only). Returns
-    [game dicts]. Raises RuntimeError when nothing usable comes back —
-    the caller must print the degraded path, not advice.
+    Event IDs come from nflverse games.csv (espn column), filtered to
+    `season` — the cached file spans 1999-2026 and unfiltered reads match
+    every prior year's same-numbered week. Pricing from the ESPN core API
+    odds endpoint (undocumented, game-level only). Returns [game dicts].
+    Raises RuntimeError when nothing usable comes back — the caller must
+    print the degraded path, not advice.
     """
     games = []
     opener = gzip.open if str(games_gz).endswith(".gz") else open
@@ -914,7 +985,8 @@ def fetch_week_odds(games_gz, nfl_week):
                 wk = int(r.get("week") or 0)
             except (TypeError, ValueError):
                 continue
-            if (r.get("season_type") != "REG" or wk != nfl_week
+            if (not _reg_game_row(r) or wk != nfl_week
+                    or str(r.get("season") or "") != season
                     or not r.get("espn")):
                 continue
             games.append({"eid": r["espn"], "away": r["away_team"],
@@ -1024,10 +1096,10 @@ def cmd_playoff_odds(a):
             records[rid] = (rs.get("wins") or 0, rs.get("losses") or 0,
                             rs.get("ties") or 0)
             names[rid] = uname.get(r.get("owner_id"), "?")
-        sched, pf = fetch_remaining_schedule(lid, nfl_week)
-        for rid, v in pf.items():
-            played_wks = max(nfl_week - 1, 1)
-            pfpg[rid] = v / played_wks
+        # fetch_remaining_schedule already returns points FOR PER GAME —
+        # assigning directly. (Dividing again by weeks-played was a real
+        # bug: it shrank every team's PF/G and corrupted the sim odds.)
+        sched, pfpg = fetch_remaining_schedule(lid, nfl_week)
         probs = simulate_playoffs(records, sched, pteams, pfpg=pfpg)
         my_rid = next((str(r["roster_id"]) for r in rosters
                        if r.get("owner_id") == a.me), None)
