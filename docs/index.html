@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>snapusa · FF Command Center</title>
+<style>
+:root{
+  --bg:#0a0c14; --panel:#121624; --panel2:#171c2e; --border:#232a40;
+  --text:#e9ecf5; --muted:#8b93ad; --dim:#5c637e;
+  --accent:#5b60f5; --accent-soft:rgba(91,96,245,.14);
+  --qb:#3d8bfd; --rb:#2fbf71; --wr:#a259f7; --te:#f5853c;
+  --pos:#35d07f; --neg:#ff5d5d;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+body{background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased}
+.num,.muscore,.tcount,.orow b,.rk{font-variant-numeric:tabular-nums}
+.wrap{max-width:1440px; margin:0 auto; padding:0 20px}
+/* top bar */
+.topbar{display:flex; align-items:center; gap:14px; padding:14px 0; border-bottom:1px solid var(--border); flex-wrap:wrap}
+.brand{display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:.06em; font-size:15px}
+.brand svg{width:30px; height:30px}
+.pill{background:var(--panel2); border:1px solid var(--border); border-radius:6px;
+  padding:7px 12px; font-size:12px; font-weight:700; letter-spacing:.05em; color:var(--muted)}
+.pill b{color:var(--text)}
+.pill.accent{border-color:var(--accent); color:#c9ccff; background:var(--accent-soft)}
+.pill.accent b{color:#fff}
+.top-right{margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+.snap{font-size:11px; color:var(--dim); letter-spacing:.04em}
+/* layout */
+.grid{display:grid; grid-template-columns:7fr 5fr; gap:16px; margin-top:16px}
+.card{background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden}
+.card-h{padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px}
+.card-h h2{font-size:12px; font-weight:800; letter-spacing:.12em; color:var(--muted)}
+.card-h .tag{margin-left:auto; font-size:11px; color:var(--dim)}
+.card-b{padding:6px 0}
+/* tables */
+table{width:100%; border-collapse:collapse; font-size:13px}
+th{text-align:left; font-size:10.5px; letter-spacing:.1em; color:var(--dim); font-weight:700;
+  padding:8px 12px; border-bottom:1px solid var(--border); white-space:nowrap}
+td{padding:8px 12px; border-bottom:1px solid rgba(35,42,64,.5); white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:rgba(91,96,245,.06)}
+td.num,th.num{text-align:right}
+td.rk{color:var(--dim); font-weight:700; width:34px}
+td.team{font-weight:700}
+.dim{color:var(--muted)}
+.pos{color:var(--pos); font-weight:700} .neg{color:var(--neg); font-weight:700}
+.bar{display:inline-block; width:90px; height:6px; background:#232a40; border-radius:3px;
+  vertical-align:middle; margin-right:8px; overflow:hidden}
+.bar i{display:block; height:100%; background:linear-gradient(90deg,var(--accent),#8b8ff7); border-radius:3px}
+td.odds b,.orow b{font-size:12.5px}
+.na{color:var(--dim)}
+/* right rail rows */
+.orow,.trow{display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid rgba(35,42,64,.5)}
+.orow:last-child,.trow:last-child,.tx:last-child{border-bottom:none}
+.oteam{width:130px; font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis}
+.orow .bar{flex:1}
+.tname{font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis}
+.tnfl{color:var(--dim); font-size:12px; width:36px}
+.tcount{color:var(--muted); font-size:12px; font-weight:700}
+.pos{display:inline-block; min-width:30px; text-align:center; font-size:10.5px; font-weight:800;
+  letter-spacing:.05em; border-radius:4px; padding:3px 6px; color:#0a0c14}
+.pos.qb{background:var(--qb)} .pos.rb{background:var(--rb)}
+.pos.wr{background:var(--wr)} .pos.te{background:var(--te)}
+.pos.k{background:#9aa3bd} .pos.df{background:#6b7280; color:#fff}
+/* matchups */
+.mu-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; margin-top:16px}
+.mucard{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:6px 0}
+.muside{display:flex; justify-content:space-between; align-items:center; padding:9px 16px}
+.muside + .muside{border-top:1px solid rgba(35,42,64,.5)}
+.muteam{font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.muscore{font-size:20px; font-weight:800; color:var(--muted)}
+.muside.win .muscore{color:var(--text)}
+.muside.win .muteam{color:#fff}
+.muside.win{box-shadow:inset 3px 0 0 var(--accent)}
+.muvs{font-size:9px; letter-spacing:.2em; color:var(--dim); padding:0 16px}
+/* transactions */
+.tx{padding:10px 16px; border-bottom:1px solid rgba(35,42,64,.5)}
+.txhead{display:flex; gap:10px; align-items:baseline; margin-bottom:6px; flex-wrap:wrap}
+.txtype{font-size:10px; font-weight:800; letter-spacing:.08em; background:var(--accent-soft);
+  color:#c9ccff; border:1px solid var(--accent); border-radius:4px; padding:2px 7px}
+.txteams{font-weight:700; font-size:12.5px}
+.txtime{margin-left:auto; color:var(--dim); font-size:11.5px}
+.txbody{display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:12.5px}
+.txp.in{color:var(--pos)} .txp.out{color:var(--neg)}
+/* bottom strip + footer */
+.sections{display:flex; gap:18px; justify-content:center; padding:18px 0 6px; flex-wrap:wrap;
+  font-size:11px; letter-spacing:.14em; color:var(--dim); font-weight:700}
+.sections a{color:var(--dim); text-decoration:none} .sections a:hover{color:var(--text)}
+footer{border-top:1px solid var(--border); margin-top:14px; padding:16px 0 28px;
+  color:var(--dim); font-size:12px; display:flex; gap:16px; flex-wrap:wrap; justify-content:space-between}
+footer b{color:var(--muted)}
+.table-scroll{overflow-x:auto}
+@media (max-width:980px){
+  .grid{grid-template-columns:1fr}
+  .top-right{margin-left:0}
+  .oteam{width:110px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 2 28 8v9c0 7-5.4 11.4-12 13C9.4 28.4 4 24 4 17V8L16 2z" fill="#1a1f36" stroke="#5b60f5" stroke-width="2"/>
+        <path d="M11 16.5l3.5 3.5L21 13" stroke="#8b8ff7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      FF COMMAND<br>CENTER
+    </div>
+    <div class="pill">LEAGUE: <b>14-TEAM · SUPERFLEX · PPR · 2026</b> · ID: snapusa</div>
+    <div class="pill accent">WEEK <b>3</b> · UPCOMING</div>
+    <div class="top-right">
+      <span class="snap">PUBLIC SNAPSHOT · DATA AS OF<br><b style="color:var(--muted)">Sep 21, 2026 · 11:50 PM PT</b></span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="card" id="standings">
+      <div class="card-h"><h2>STANDINGS</h2><span class="tag">14 teams · sorted W-L, PF</span></div>
+      <div class="card-b table-scroll">
+        <table>
+          <thead><tr><th>RK</th><th>TEAM</th><th class="num">W-L</th><th class="num">PF</th>
+          <th class="num">PA</th><th class="num">DIFF</th><th>PLAYOFF&nbsp;%</th>
+          <th class="num">EXP&nbsp;W</th><th class="num">LUCK</th></tr></thead>
+          <tbody><tr><td class="rk">1</td><td class="team">eeeeeeeeeeeee</td><td class="num">2-0</td><td class="num">316</td><td class="num dim">258</td><td class="num pos">+58</td><td class="odds"><div class="bar"><i style="width:100%"></i></div><b>100%</b></td><td class="num">11.4</td><td class="num"><span class="pos">+0.3</span></td></tr>
+<tr><td class="rk">2</td><td class="team">jmmurillo</td><td class="num">2-0</td><td class="num">308</td><td class="num dim">238</td><td class="num pos">+70</td><td class="odds"><div class="bar"><i style="width:99%"></i></div><b>99%</b></td><td class="num">11.0</td><td class="num"><span class="pos">+0.6</span></td></tr>
+<tr><td class="rk">3</td><td class="team">Nun4noschmuckk</td><td class="num">2-0</td><td class="num">297</td><td class="num dim">287</td><td class="num pos">+10</td><td class="odds"><div class="bar"><i style="width:97%"></i></div><b>97%</b></td><td class="num">10.2</td><td class="num"><span class="pos">+0.5</span></td></tr>
+<tr><td class="rk">4</td><td class="team">Arrest Cooper Rush</td><td class="num">2-0</td><td class="num">269</td><td class="num dim">238</td><td class="num pos">+31</td><td class="odds"><div class="bar"><i style="width:72%"></i></div><b>72%</b></td><td class="num">8.1</td><td class="num"><span class="pos">+1.1</span></td></tr>
+<tr><td class="rk">5</td><td class="team">LISAN AL GIBBS</td><td class="num">1-1</td><td class="num">303</td><td class="num dim">267</td><td class="num pos">+36</td><td class="odds"><div class="bar"><i style="width:96%"></i></div><b>96%</b></td><td class="num">9.7</td><td class="num"><span class="pos">+0.0</span></td></tr>
+<tr><td class="rk">6</td><td class="team">beastquake67</td><td class="num">1-1</td><td class="num">297</td><td class="num dim">285</td><td class="num pos">+12</td><td class="odds"><div class="bar"><i style="width:92%"></i></div><b>92%</b></td><td class="num">9.2</td><td class="num"><span class="neg">-0.5</span></td></tr>
+<tr><td class="rk">7</td><td class="team">UNITED STATES OF AMERICA</td><td class="num">1-1</td><td class="num">295</td><td class="num dim">296</td><td class="num neg">-1</td><td class="odds"><div class="bar"><i style="width:89%"></i></div><b>89%</b></td><td class="num">9.0</td><td class="num"><span class="neg">-0.5</span></td></tr>
+<tr><td class="rk">8</td><td class="team">thebeast3000</td><td class="num">1-1</td><td class="num">280</td><td class="num dim">268</td><td class="num pos">+12</td><td class="odds"><div class="bar"><i style="width:71%"></i></div><b>71%</b></td><td class="num">7.9</td><td class="num"><span class="neg">-0.1</span></td></tr>
+<tr><td class="rk">9</td><td class="team">airconaaron</td><td class="num">1-1</td><td class="num">268</td><td class="num dim">275</td><td class="num neg">-7</td><td class="odds"><div class="bar"><i style="width:36%"></i></div><b>36%</b></td><td class="num">7.0</td><td class="num"><span class="pos">+0.2</span></td></tr>
+<tr><td class="rk">10</td><td class="team">Palo Alto Purdy&#x27;s</td><td class="num">1-1</td><td class="num">263</td><td class="num dim">283</td><td class="num neg">-20</td><td class="odds"><div class="bar"><i style="width:25%"></i></div><b>25%</b></td><td class="num">6.6</td><td class="num"><span class="pos">+0.4</span></td></tr>
+<tr><td class="rk">11</td><td class="team">My Friend Derek&#x27;s</td><td class="num">0-2</td><td class="num">269</td><td class="num dim">277</td><td class="num neg">-8</td><td class="odds"><div class="bar"><i style="width:21%"></i></div><b>21%</b></td><td class="num">6.0</td><td class="num"><span class="neg">-0.8</span></td></tr>
+<tr><td class="rk">12</td><td class="team">GOGOGO</td><td class="num">0-2</td><td class="num">246</td><td class="num dim">314</td><td class="num neg">-68</td><td class="odds"><div class="bar"><i style="width:2%"></i></div><b>2%</b></td><td class="num">4.3</td><td class="num"><span class="neg">-0.7</span></td></tr>
+<tr><td class="rk">13</td><td class="team">SNAPCHAT GHOST BUSTER</td><td class="num">0-2</td><td class="num">219</td><td class="num dim">269</td><td class="num neg">-50</td><td class="odds"><div class="bar"><i style="width:0%"></i></div><b>0%</b></td><td class="num">2.7</td><td class="num"><span class="neg">-0.2</span></td></tr>
+<tr><td class="rk">14</td><td class="team">The Protagonist</td><td class="num">0-2</td><td class="num">205</td><td class="num dim">281</td><td class="num neg">-76</td><td class="odds"><div class="bar"><i style="width:0%"></i></div><b>0%</b></td><td class="num">1.9</td><td class="num"><span class="pos">+0.0</span></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div>
+      <section class="card" id="odds" style="margin-bottom:16px">
+        <div class="card-h"><h2>PLAYOFF ODDS</h2><span class="tag">engine · Monte Carlo</span></div>
+        <div class="card-b"><div class="orow"><span class="oteam">eeeeeeeeeeeee</span><div class="bar"><i style="width:100%"></i></div><b>100%</b></div>
+<div class="orow"><span class="oteam">jmmurillo</span><div class="bar"><i style="width:99%"></i></div><b>99%</b></div>
+<div class="orow"><span class="oteam">Nun4noschmuckk</span><div class="bar"><i style="width:97%"></i></div><b>97%</b></div>
+<div class="orow"><span class="oteam">LISAN AL GIBBS</span><div class="bar"><i style="width:96%"></i></div><b>96%</b></div>
+<div class="orow"><span class="oteam">beastquake67</span><div class="bar"><i style="width:92%"></i></div><b>92%</b></div>
+<div class="orow"><span class="oteam">UNITED STATES OF AMERICA</span><div class="bar"><i style="width:89%"></i></div><b>89%</b></div>
+<div class="orow"><span class="oteam">Arrest Cooper Rush</span><div class="bar"><i style="width:72%"></i></div><b>72%</b></div>
+<div class="orow"><span class="oteam">thebeast3000</span><div class="bar"><i style="width:71%"></i></div><b>71%</b></div></div>
+      </section>
+      <section class="card" id="velocity">
+        <div class="card-h"><h2>WAIVER VELOCITY</h2><span class="tag">most-added · 24h</span></div>
+        <div class="card-b"><div class="trow"><span class="pos rb">RB</span><span class="tname">Emanuel Wilson</span><span class="tnfl">SEA</span><span class="tcount">935K adds</span></div>
+<div class="trow"><span class="pos qb">QB</span><span class="tname">Bryce Young</span><span class="tnfl">CAR</span><span class="tcount">553K adds</span></div>
+<div class="trow"><span class="pos wr">WR</span><span class="tname">Tre Tucker</span><span class="tnfl">LV</span><span class="tcount">486K adds</span></div>
+<div class="trow"><span class="pos qb">QB</span><span class="tname">Tyler Shough</span><span class="tnfl">NO</span><span class="tcount">477K adds</span></div>
+<div class="trow"><span class="pos wr">WR</span><span class="tname">Adonai Mitchell</span><span class="tnfl">NYJ</span><span class="tcount">416K adds</span></div>
+<div class="trow"><span class="pos te">TE</span><span class="tname">Zach Ertz</span><span class="tnfl"></span><span class="tcount">317K adds</span></div>
+<div class="trow"><span class="pos te">TE</span><span class="tname">Darren Waller</span><span class="tnfl">CAR</span><span class="tcount">295K adds</span></div>
+<div class="trow"><span class="pos wr">WR</span><span class="tname">Konata Mumpfield</span><span class="tnfl">LAR</span><span class="tcount">280K adds</span></div>
+<div class="trow"><span class="pos wr">WR</span><span class="tname">Malachi Fields</span><span class="tnfl">NYG</span><span class="tcount">259K adds</span></div>
+<div class="trow"><span class="pos rb">RB</span><span class="tname">Tank Bigsby</span><span class="tnfl">PHI</span><span class="tcount">243K adds</span></div></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card" id="matchups" style="margin-top:16px">
+    <div class="card-h"><h2>WEEK 2 MATCHUPS</h2><span class="tag">final · Sleeper scores</span></div>
+  </section>
+  <div class="mu-grid"><div class="mucard"><div class="muside win"><span class="muteam">LISAN AL GIBBS</span><span class="muscore">168.1</span></div><div class="muvs">VS</div><div class="muside"><span class="muteam">airconaaron</span><span class="muscore">125.5</span></div></div>
+<div class="mucard"><div class="muside"><span class="muteam">GOGOGO</span><span class="muscore">102.9</span></div><div class="muvs">VS</div><div class="muside win"><span class="muteam">jmmurillo</span><span class="muscore">166.5</span></div></div>
+<div class="mucard"><div class="muside"><span class="muteam">The Protagonist</span><span class="muscore">97.1</span></div><div class="muvs">VS</div><div class="muside win"><span class="muteam">eeeeeeeeeeeee</span><span class="muscore">139.3</span></div></div>
+<div class="mucard"><div class="muside"><span class="muteam">UNITED STATES OF AMERICA</span><span class="muscore">147.4</span></div><div class="muvs">VS</div><div class="muside win"><span class="muteam">Nun4noschmuckk</span><span class="muscore">152.4</span></div></div>
+<div class="mucard"><div class="muside"><span class="muteam">SNAPCHAT GHOST BUSTER</span><span class="muscore">108.7</span></div><div class="muvs">VS</div><div class="muside win"><span class="muteam">beastquake67</span><span class="muscore">135.5</span></div></div>
+<div class="mucard"><div class="muside win"><span class="muteam">Palo Alto Purdy&#x27;s</span><span class="muscore">132.0</span></div><div class="muvs">VS</div><div class="muside"><span class="muteam">My Friend Derek&#x27;s</span><span class="muscore">129.5</span></div></div>
+<div class="mucard"><div class="muside"><span class="muteam">thebeast3000</span><span class="muscore">127.0</span></div><div class="muvs">VS</div><div class="muside win"><span class="muteam">Arrest Cooper Rush</span><span class="muscore">136.3</span></div></div></div>
+
+  <section class="card" id="transactions" style="margin-top:16px">
+    <div class="card-h"><h2>RECENT TRANSACTIONS</h2><span class="tag">league activity</span></div>
+    <div class="card-b"><div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">UNITED STATES OF AMERICA</span><span class="txtime">Sep 20 · 09:03 AM</span></div><div class="txbody"><span class="pos rb">RB</span><span class="txp in">+ Alvin Kamara</span> <span class="pos rb">RB</span><span class="txp out">− Brian Robinson</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">The Protagonist</span><span class="txtime">Sep 20 · 02:16 AM</span></div><div class="txbody"><span class="pos te">TE</span><span class="txp in">+ Michael Mayer</span> <span class="pos qb">QB</span><span class="txp out">− Kirk Cousins</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">eeeeeeeeeeeee</span><span class="txtime">Sep 19 · 05:17 PM</span></div><div class="txbody"><span class="pos k">K</span><span class="txp in">+ Tyler Loop</span> <span class="pos k">K</span><span class="txp out">− Will Reichard</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">beastquake67</span><span class="txtime">Sep 19 · 11:24 AM</span></div><div class="txbody"><span class="pos qb">QB</span><span class="txp in">+ Michael Penix</span> <span class="pos rb">RB</span><span class="txp out">− Samaje Perine</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">Nun4noschmuckk</span><span class="txtime">Sep 19 · 10:06 AM</span></div><div class="txbody"><span class="pos wr">WR</span><span class="txp in">+ Adonai Mitchell</span> <span class="pos k">DB</span><span class="txp out">− Travis Hunter</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">beastquake67</span><span class="txtime">Sep 19 · 09:17 AM</span></div><div class="txbody"><span class="pos rb">RB</span><span class="txp in">+ Kenny Gainwell</span> <span class="pos rb">RB</span><span class="txp out">− Justice Hill</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">Nun4noschmuckk</span><span class="txtime">Sep 19 · 09:10 AM</span></div><div class="txbody"><span class="pos df">DEF</span><span class="txp in">+ PIT D/ST</span> <span class="pos te">TE</span><span class="txp out">− Cade Otton</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">The Protagonist</span><span class="txtime">Sep 18 · 08:14 PM</span></div><div class="txbody"><span class="pos wr">WR</span><span class="txp in">+ Antonio Williams</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">TRADE</span><span class="txteams">LISAN AL GIBBS ↔ Nun4noschmuckk</span><span class="txtime">Sep 17 · 01:11 PM</span></div><div class="txbody"><span class="pos wr">WR</span><span class="txp in">+ KC Concepcion</span> <span class="pos qb">QB</span><span class="txp in">+ Drew Lock</span> <span class="pos wr">WR</span><span class="txp out">− KC Concepcion</span> <span class="pos qb">QB</span><span class="txp out">− Drew Lock</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">FA</span><span class="txteams">GOGOGO</span><span class="txtime">Sep 16 · 05:44 PM</span></div><div class="txbody"><span class="pos wr">WR</span><span class="txp in">+ Mack Hollins</span> <span class="pos wr">WR</span><span class="txp out">− Jordyn Tyson</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">WAIVER</span><span class="txteams">UNITED STATES OF AMERICA</span><span class="txtime">Sep 16 · 01:01 PM</span></div><div class="txbody"><span class="pos wr">WR</span><span class="txp in">+ Xavier Worthy</span> <span class="pos te">TE</span><span class="txp out">− Kenyon Sadiq</span></div></div>
+<div class="tx"><div class="txhead"><span class="txtype">TRADE</span><span class="txteams">The Protagonist ↔ beastquake67</span><span class="txtime">Sep 16 · 12:54 PM</span></div><div class="txbody"><span class="pos wr">WR</span><span class="txp in">+ Rome Odunze</span> <span class="pos qb">QB</span><span class="txp in">+ Bryce Young</span> <span class="pos wr">WR</span><span class="txp out">− Rome Odunze</span> <span class="pos qb">QB</span><span class="txp out">− Bryce Young</span></div></div></div>
+  </section>
+
+  <nav class="sections" aria-label="Sections">
+    <a href="#standings">STANDINGS</a><a href="#odds">PLAYOFF ODDS</a>
+    <a href="#velocity">WAIVER VELOCITY</a><a href="#matchups">MATCHUPS</a>
+    <a href="#transactions">TRANSACTIONS</a>
+  </nav>
+
+  <footer>
+    <div><b>Source:</b> Sleeper public API · snapshot Sep 21, 2026 · 11:50 PM PT · scores update as games complete</div>
+    <div><b>Playoff odds:</b> engine Monte Carlo sim, headline aggregates only</div>
+    <div><b>Privacy:</b> league-level data only — no rosters, targets, or strategy published</div>
+  </footer>
+
+</div>
+</body>
+</html>
