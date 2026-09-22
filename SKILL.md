@@ -16,21 +16,49 @@ weekend warriors `1379714328738955264` (4-team, 1-QB, half-PPR).
 Sleeper IDs, endpoints, and the FantasyCalc valuation API are documented in
 `references/api_notes.md`. Players DB cache: `~/workspace/sleeper/players.json`.
 
-The engine prints: league trade history (market comps), team needs vs
-effective starting slots, Wesley's roster by value (with FantasyPros bye
-weeks), a bye-week audit that flags clusters (3+ on the same bye — avoid
-adding more), a value-divergence section (FantasyPros rest-of-season ECR
-rank vs FantasyCalc rank; |diff| >= 12 spots flagged as hold/buy-low or
-sell-high), candidate swaps ranked by projected lineup-points delta for
-him (the marginal gain to *his* optimal starting lineup by FantasyCalc
-redraft value, not the smallest value gap — annotated with the value gap
-for fairness, bye weeks and bye-stack warnings, and exactly who starts
-and who sits after the deal; lateral swaps where the incoming player
-can't crack his projected starting lineup are dropped outright), hole-creating options it refuses to price on its
-own, and a waiver-wire section (top free agents by position on FantasyCalc
-redraft value, trending adds, and add/drop suggestions vs his droppable
-bench). The header also prints the season clock: current NFL week, weeks
-to the trade deadline, and the posture below.
+The engine prints: league trade history (market comps), manager trade
+profiles mined from those deals (G2 — who buys/sells which positions,
+how often, net FantasyCalc value), team needs vs effective starting
+slots, a playoff-odds + schedule-luck line from the weekly snapshot
+(G4 Monte Carlo playoff probabilities, G7 all-play expected wins vs
+actual), Wesley's roster by value (with FantasyPros bye weeks and, from
+Week 5, G5 playoff-schedule tags `[P+]`/`[P-]` weighting the W15-17
+slate x0.9-1.1), a bye-week audit, a 4-week bye-crater forecast (G9 —
+2+ projected starters on the same bye flagged), a value-divergence
+section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank; |diff|
+>= 12 spots flagged as hold/buy-low or sell-high), a usage-gap radar
+(G1 — nflverse usage vs fantasy output: buy-low/sell-high on target
+share, air-yards share, snap%; routes are unavailable in every free
+source and are never synthesized), candidate swaps ranked by projected
+lineup-points delta for him (the marginal gain to *his* optimal starting
+lineup by FantasyCalc redraft value, not the smallest value gap —
+annotated with the value gap for fairness, bye weeks and bye-stack
+warnings, and exactly who starts and who sits after the deal; lateral
+swaps where the incoming player can't crack his projected starting
+lineup are dropped outright), hole-creating options it refuses to price
+on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
+and who holds him: mine/free/opponent), and a waiver-wire section (top
+free agents by position on FantasyCalc redraft value, trending velocity
+(G3 — Sleeper-wide adds, 24h rate vs 48h/168h baseline: NEW/HEATING/
+COOLING), add/drop suggestions vs his droppable bench, and a roster-clog
+audit (G8 — bench ranked by contingent value; handcuffs, hurt-starter
+backups, and rising-usage players are protected, never named as drops)).
+The header also prints the season clock: current NFL week, weeks to the
+trade deadline, and the posture below.
+
+The new analytics live in `bin/fantasy_insights.py` (pure, tested
+functions + fetch helpers; `bin/trade_board.py` imports it). Two weekly
+jobs write goal snapshots other jobs read (no separate radar cron — the
+board computes G1/G2/G3/G5/G6/G8/G9 live every run, so a snapshot would
+be redundant):
+- `fantasy-playoff-odds` (Tue ~06:19 PT): `playoff-odds` CLI →
+  `hidden_files/playoff-odds.md` (G4 playoff probabilities + G7
+  schedule luck). Read by the Tue/Wed trade jobs and Friday preview.
+- `fantasy-game-odds` (Fri ~17:19 PT): `game-odds` CLI →
+  `hidden_files/game-odds.md` (G10 DraftKings game spreads/totals →
+  start/sit script + shootout signals; player props don't exist in free
+  data — game-level only). Read by the Friday preview, Saturday
+  auto-sub, and Sunday inactives jobs.
 
 ## Judgment layers (what makes this better than a trade calculator)
 
@@ -116,7 +144,9 @@ to the trade deadline, and the posture below.
    needs and start weighing playoff-week (W15-17) value in every deal.
    Deadline run (W9-11): win-now — maximize rest-of-season plus playoff
    points, pay up for certainty, and stop acquiring stashes you can't
-   start. Label every proposal **RENTAL** (pays off in the next 2-3
+   start. The engine's G5 weighting applies the playoff lens mechanically
+   from Week 5 (`[P+]`/`[P-]` tags = W15-17 schedule-adjusted x0.9-1.1;
+   Week 5-8 deals should lean into it, not fight it). Label every proposal **RENTAL** (pays off in the next 2-3
    weeks) or **KEEPER** (rest-of-season/playoff value) so the horizon
    is explicit. After the deadline: waivers only, no trade proposals.
 9. **Fit-asymmetry veto.** The engine only shows swaps where the incoming
