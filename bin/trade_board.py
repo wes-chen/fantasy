@@ -767,6 +767,104 @@ def main():
         print(f"  ({n_blocked} of your tradable player(s) ON-BLOCK: pending "
               f"offer open, not proposed)")
     print()
+    # --- E3: 2-for-1 consolidation (small leagues only) ---
+    # WW's core move: two of your surplus starters for one elite. In a
+    # 14-team desert depth is currency, so this section only runs where
+    # num_teams <= 6. Package pieces come from tradable() surplus (so the
+    # deal never creates a hole for you); targets are each partner's elite
+    # core. Ranked by lineup-points delta per freed roster slot (a 2-for-1
+    # always frees exactly one, which refills from the wire in a 4-team
+    # league), with the value gap vs the combined package shown for
+    # fairness and the same bye-cluster veto as 1-for-1s.
+    if num_teams <= 6:
+        print("=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
+        print("  two surplus pieces -> one elite; ranked by lineup-points "
+              "delta per freed roster slot (freed slot refills from the "
+              "wire); both pieces must be a position they need")
+
+        def swap_delta_2for1(mine_a, mine_b, theirs):
+            """Lineup-points delta of sending two players for one.
+            Values are injury-discounted (E5/ADV-FF-10); a swap pushing a
+            bye week to 4+ projected starters is vetoed, 3 starters take
+            a 20% penalty (completes E1/ADV-FF-15)."""
+            gone = {mine_a["id"], mine_b["id"]}
+            new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
+                             if x["id"] not in gone]
+                         for p, lst in me["bypos"].items()}
+            new_bypos.setdefault(theirs["pos"], []).append(
+                dict(theirs, val=dval_for(theirs)))
+            new_lineup = lineup_ids(new_bypos)
+            new_ids = {x["id"] for x in new_lineup}
+            delta = sum(x["val"] for x in new_lineup) - my_lineup_dval
+            bye_veto = False
+            tb = fp.get(theirs["id"], (None, None, None))[0]
+            if tb:
+                others = sum(1 for x in new_lineup if x["id"] != theirs["id"]
+                             and fp.get(x["id"], (None, None, None))[0] == tb)
+                if others >= 3:
+                    bye_veto = True
+                elif others == 2:
+                    delta -= 0.20 * dval_for(theirs)
+            sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
+            starts = [x["name"] for x in new_lineup
+                      if x["id"] not in my_lineup_ids]
+            return delta, sits, starts, bye_veto
+
+        def show_2for1(a, b, theirs, partner, thins_them):
+            da, db, dt = dval_for(a), dval_for(b), dval_for(theirs)
+            gap = abs((da + db) - dt) / max(da + db, dt, 1)
+            delta, sits, _, _ = swap_delta_2for1(a, b, theirs)
+            tag = " [THINS THEM]" if thins_them else ""
+            fit = ("; " + theirs["name"] + " starts"
+                   + (", " + ", ".join(sits) + " sits" if sits else ""))
+            return (delta,
+                    f"  you send {a['name']} ({a['val']}) + "
+                    f"{b['name']} ({b['val']}){_btag(a)}{_btag(b)} -> "
+                    f"{partner}; you get {theirs['name']} "
+                    f"({theirs['val']}){_btag(theirs)} "
+                    f"[lineup {delta:+.0f}{fit}][gap vs combined "
+                    f"{gap:.0%}][frees 1 slot]{tag}")
+
+        package = sorted(my_tradable, key=lambda t: -t[0]["val"])[:12]
+        rows2, bye_dropped2 = [], 0
+        for i in range(len(package)):
+            for j in range(i + 1, len(package)):
+                (pa, _), (pb, _) = package[i], package[j]
+                for rid, st in teams.items():
+                    if rid == my_rid:
+                        continue
+                    t_need = need_score(st)
+                    if t_need.get(pa["pos"], 0) <= 0 or \
+                       t_need.get(pb["pos"], 0) <= 0:
+                        continue  # they don't need both pieces
+                    elite = sorted(
+                        [x for p in eff_slots for x in st["bypos"].get(p, [])
+                         if x["prank"] <= cutoff[p]],
+                        key=lambda x: -dval_for(x))[:6]
+                    thin_ids = {x["id"] for x, _ in hole_creating(st)}
+                    da, db = dval_for(pa), dval_for(pb)
+                    for theirs in elite:
+                        dt = dval_for(theirs)
+                        if dt <= 0 or dt < max(da, db) * 1.15:
+                            continue  # not a tier-break upgrade
+                        delta, _, _, veto = swap_delta_2for1(pa, pb, theirs)
+                        if veto:
+                            bye_dropped2 += 1
+                            continue
+                        if delta <= 0:
+                            continue  # fit veto: no lineup gain
+                        rows2.append(show_2for1(
+                            pa, pb, theirs, st["name"],
+                            theirs["id"] in thin_ids))
+        for _, line in sorted(rows2, reverse=True)[:5]:
+            print(line)
+        if not rows2:
+            print("  (no 2-for-1 consolidation fits: your surplus doesn't "
+                  "buy an elite's lineup gain)")
+        if bye_dropped2:
+            print(f"  ({bye_dropped2} 2-for-1(s) vetoed: incoming elite "
+                  f"would push a bye week to 4+ projected starters)")
+        print()
     print("=== HOLE-CREATING OPTIONS (persona must price the roster cost) ===")
     for mine, mp in hole_creating(me):
         if mine["id"] in onblock:
