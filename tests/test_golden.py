@@ -621,8 +621,19 @@ _m = re.search(r"snapusa waiver slot: (\d+) of 14( — SCARCE)?", out)
 check("NF-01: snapusa slot line self-consistent",
       bool(_m) and (("— SCARCE" in _m.group(0))
                     == (int(_m.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
+# E3: 2-for-1 consolidation is WW-only (4-team), never snapusa (14-team).
 _m2 = re.search(r"weekend warriors waiver slot: (\d+) of 4( — SCARCE)?",
                 out_ww)
+check("NF-01: WW slot line self-consistent",
+      bool(_m2) and (("— SCARCE" in _m2.group(0))
+                     == (int(_m2.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
+check("E3: WW prints the 2-for-1 consolidation section",
+      "=== 2-FOR-1 CONSOLIDATION (stars over depth) ===" in out_ww,
+      "WW output lacks the section")
+out_snap = run_board(SNAPUSA).stdout
+check("E3: snapusa never prints 2-for-1s (depth is currency there)",
+      "=== 2-FOR-1 CONSOLIDATION" not in out_snap,
+      "2-for-1 section leaked into the 14-team board")
 check("NF-01: WW slot line self-consistent",
       bool(_m2) and (("— SCARCE" in _m2.group(0))
                      == (int(_m2.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
