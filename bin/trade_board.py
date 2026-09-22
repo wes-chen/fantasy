@@ -862,14 +862,21 @@ def main():
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
                         for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
-    # G3: trending velocity — one polite call per lookback window
-    # (24/48/168h); HEATING = adds accelerating vs the 7d rate.
+    # G3: trending velocity — exactly ONE Sleeper call per scan; velocity
+    # is derived from our own timestamped snapshot history (this scan's
+    # 24h adds vs adds over the gap since the previous scan).
+    _vel_rows = []
     try:
-        _windows = fi.fetch_trending_windows()
+        _counts = {str(t.get("player_id")): t.get("count") or 0
+                   for t in fi.fetch_trending()}
+        _snaps = fi.load_trend_snapshots()
+        _prev = _snaps[-1] if _snaps else None
+        fi.save_trend_snapshot(_counts)
+        _vel_rows = fi.trending_velocity(_counts, _prev, players, rostered)
     except Exception:
-        _windows = {}
+        pass
     tfa = []
-    for _row in fi.trending_velocity(_windows, players, rostered):
+    for _row in _vel_rows:
         if _row["pos"] not in WPOS:
             continue
         _pid = _row["sid"]
@@ -882,7 +889,7 @@ def main():
             + (f"[!{inj}]" if inj in HURT else ""))
         if len(tfa) >= 8:
             break
-    print(f"  trending velocity (Sleeper-wide adds, 24h vs baseline): "
+    print(f"  trending velocity (Sleeper-wide adds, 24h vs previous scan): "
           f"{', '.join(tfa) if tfa else '(unavailable this run)'}")
     bench = []
     for p in eff_slots:
