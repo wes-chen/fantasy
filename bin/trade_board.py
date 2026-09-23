@@ -102,6 +102,35 @@ def injury_discount(status):
     """Value multiplier for an injury designation (E5)."""
     return INJURY_DISCOUNT.get(status or "", 1.0)
 
+
+def ir_capacity(reserve_slots, reserve_count):
+    """IR-slot accounting (E13): returns (slots, open).
+
+    Sleeper exposes IR capacity as league settings.reserve_slots and
+    occupants as each roster's `reserve` list. A full IR means the next
+    injury costs an active roster spot — stash value depends on this.
+    """
+    try:
+        slots = int(reserve_slots or 0)
+    except (TypeError, ValueError):
+        slots = 0
+    try:
+        used = int(reserve_count or 0)
+    except (TypeError, ValueError):
+        used = 0
+    return slots, max(slots - used, 0)
+
+
+def ir_line(ir_names, reserve_slots, reserve_count):
+    """Roster-audit IR line with capacity and a full-IR warning (E13)."""
+    slots, open_ = ir_capacity(reserve_slots, reserve_count)
+    names = ", ".join(ir_names) if ir_names else "\u2014"
+    s = f"  IR: {names} ({len(ir_names)}/{slots} used, {open_} open)"
+    if slots and open_ == 0:
+        s += (" — IR FULL: the next injury costs an ACTIVE roster spot; "
+              "injured stashes can't hide here")
+    return s
+
 def count_flex_slots(roster_positions):
     """Exact 'FLEX' slots only — 'SUPER_FLEX' is a QB slot in disguise.
     (ADV-FF-09: `"FLEX" in "SUPER_FLEX"` modeled 10 starters in snapusa;
@@ -215,6 +244,7 @@ def main():
     except Exception:
         nfl_week = 1
     trade_dl = (league.get("settings") or {}).get("trade_deadline") or 11
+    ir_slots = (league.get("settings") or {}).get("reserve_slots") or 0  # E13
     # ADV-FF-14: one canonical boundary shared with fantasy-trade-deadline-stop.
     # Sleeper trade_deadline=N means trades are legal THROUGH NFL Week N;
     # the lock takes effect when the state week rolls to N+1. (Lock semantics
@@ -562,8 +592,8 @@ def main():
             + ("[ON-BLOCK: pending offer to %s]" % onblock[x["id"]]["partner"]
                if x["id"] in onblock else "")
             for x in pls))
-    if me["ir"]:
-        print(f"  IR: {', '.join(me['ir'])}")
+    if me["ir"] or ir_slots:
+        print(ir_line(me["ir"], ir_slots, len(me["ir"])))
     print()
     if onblock:
         print("=== PENDING OFFERS (your open offers — ON-BLOCK: never propose) ===")
