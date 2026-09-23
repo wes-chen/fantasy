@@ -41,7 +41,9 @@ lineup-points delta per freed roster slot, which refills from the wire
 in a 4-team league; 14-team boards never show it — depth is currency
 there), hole-creating options it refuses to price
 on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
-and who holds him: mine/free/opponent), and a waiver-wire section (top
+and who holds him: mine/free/opponent), an IR-slot audit (E13 — used/open
+IR capacity from Sleeper's reserve_slots with a full-IR warning, since the
+next injury then costs an active roster spot), and a waiver-wire section (top
 free agents by position on FantasyCalc redraft value, trending velocity
 (G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
 since the previous scan, from our own timestamped snapshot history:
