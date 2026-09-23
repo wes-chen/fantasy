@@ -79,6 +79,25 @@ check("pending offers: pending parsed, rejected ignored",
 check("pending offers: missing file -> empty, no crash",
       tb.load_pending_offers("/nonexistent/path.md") == {})
 
+check("ir_capacity: 1 slot, 1 used -> (1, 0)",
+      tb.ir_capacity(1, 1) == (1, 0))
+check("ir_capacity: 1 slot, empty -> (1, 1)",
+      tb.ir_capacity(1, 0) == (1, 1))
+check("ir_capacity: no slots -> (0, 0)",
+      tb.ir_capacity(None, 0) == (0, 0))
+check("ir_capacity: over-full clamps at 0 open",
+      tb.ir_capacity(2, 5) == (2, 0))
+check("ir_capacity: string slots parse",
+      tb.ir_capacity("1", 1) == (1, 0))
+check("ir_line: full IR warns",
+      tb.ir_line(["Isiah Pacheco"], 1, 1) ==
+      "  IR: Isiah Pacheco (1/1 used, 0 open) — IR FULL: the next injury "
+      "costs an ACTIVE roster spot; injured stashes can't hide here")
+check("ir_line: open IR shows dash names, no warning",
+      tb.ir_line([], 1, 0) == "  IR: \u2014 (0/1 used, 1 open)")
+check("ir_line: no IR slots -> no FULL warning",
+      "IR FULL" not in tb.ir_line([], None, 0))
+
 # ---------------- NF-01: waiver priority cost model ----------------
 _fake_rosters = [
     {"owner_id": "aaa", "roster_id": 1,
@@ -121,8 +140,9 @@ check("NF-01: scarce cutoff is top-3",
       and tb.slot_verdict(2, 10, 4, 12) is None)
 
 real = tb.load_pending_offers(os.path.join(SKILL, "pending_offers.md"))
-check("pending_offers.md: Pittman ON-BLOCK",
-      "6819" in real and real["6819"]["partner"] == "ydai",
+check("pending_offers.md: registry parses; on-block set is dict rows only",
+      isinstance(real, dict)
+      and all(isinstance(v, dict) and "partner" in v for v in real.values()),
       f"got {real}")
 
 # ---------------- G1-G10 ----------------
@@ -606,12 +626,25 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           "routes are unavailable" in out)
     check(f"{tag}: G8 roster-clog audit line",
           "roster-clog audit (G8" in out)
+    check(f"{tag}: IR audit line with capacity (E13)",
+          re.search(r"  IR: .+ \(\d+/\d+ used, \d+ open\)", out) is not None)
 
 out = run_board(SNAPUSA).stdout
-check("snapusa: PENDING OFFERS section (ADV-FF-07)",
-      "=== PENDING OFFERS (your open offers" in out)
-check("snapusa: Pittman flagged ON-BLOCK (ADV-FF-07)",
-      "Michael Pittman" in out and "[ON-BLOCK" in out)
+# ADV-FF-07: expectations derive from the live registry — the Pittman/Andrews
+# and Shakir/Andrews offers were rejected 2026-09-22, so the registry is
+# currently empty; if Wesley opens a new offer, the board must block it.
+_onblock = tb.load_pending_offers(os.path.join(SKILL, "pending_offers.md"))
+if _onblock:
+    check("snapusa: PENDING OFFERS section (ADV-FF-07)",
+          "=== PENDING OFFERS (your open offers" in out)
+    for _pid, _info in _onblock.items():
+        check(f"snapusa: {_info['name']} flagged ON-BLOCK (ADV-FF-07)",
+              _info["name"] in out and "[ON-BLOCK" in out)
+else:
+    check("snapusa: registry empty -> no PENDING OFFERS section, "
+          "no ON-BLOCK flags (ADV-FF-07)",
+          "=== PENDING OFFERS" not in out and "[ON-BLOCK" not in out,
+          "empty registry must not block any trades")
 check("snapusa: posture line present", "| posture:" in out)
 
 out_ww = run_board(WW).stdout
