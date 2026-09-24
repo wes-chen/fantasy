@@ -47,8 +47,14 @@ next injury then costs an active roster spot), and a waiver-wire section (top
 free agents by position on FantasyCalc redraft value, trending velocity
 (G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
 since the previous scan, from our own timestamped snapshot history:
-NEW/HEATING/COOLING), add/drop suggestions vs his droppable bench, and
-a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
+NEW/HEATING/COOLING), a slot-check line validating live roster math
+before any suggestion emits (active vs max slots — Sleeper double-lists
+IR occupants in `players`, so the engine subtracts the reserve overlap;
+FULL means every ADD needs a DROP), add/drop suggestions vs his
+droppable bench with every ADD tagged [FA NOW] (instant add, no
+priority cost) or [CLAIM — clears Tue 12:00am PT, burns #N] from recent
+drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18),
+and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, and rising-usage players are protected, never
 named as drops)).
 The header also prints the season clock: current NFL week, weeks to the
@@ -144,6 +150,15 @@ be redundant):
      be decisive (roughly 40%+) or the current starter unstartable.
      A bird in hand — this is the same instinct as holding Loveland
      over Otton, applied in reverse.
+   - **Acquisition path.** Read the engine's [FA NOW]/[CLAIM] tag on
+     every ADD before naming the move: FA NOW is instant and costs no
+     priority; a CLAIM clears at the Tuesday midnight reset and burns
+     his waiver slot — price the slot only for claims (his 9/23 ruling).
+     Read the engine's slot-check line before ever writing "no drop
+     needed": it validates live active-vs-max math with the reserve
+     overlap subtracted. IR-move advice must first pass the engine's
+     `ir_move_valid` gate — the player must not already be in `reserve`
+     (the 9/23 no-op) and an IR slot must be open.
 8. **Season clock — short-term vs long-term balance.** The engine prints a
    posture from the current NFL week and the Week 11 trade deadline.
    Early (W1-4): optimize for talent and role, not last week's points —
