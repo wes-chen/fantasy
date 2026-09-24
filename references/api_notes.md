@@ -8,6 +8,12 @@
 - Rosters: `GET /v1/league/{id}/rosters` → `players[]` (Sleeper player IDs),
   `reserve[]` (IR), `settings.wins/losses`, `settings.waiver_position`,
   `owner_id`, `roster_id`
+  - IR slots are NOT in `roster_positions` — they live in
+    `settings.reserve_slots` (league-level count) + each roster's `reserve[]`
+    (occupants). A player in `players[]` may already be in `reserve[]`
+    (i.e. in the IR slot, not on the bench) — always check `reserve[]`
+    before recommending any IR move. (Learned 2026-09-23: both of Wesley's
+    leagues show no IR in roster_positions but have `reserve_slots: 1`.)
 - Users: `GET /v1/league/{id}/users` → `user_id` → `display_name`
 - Transactions: `GET /v1/league/{id}/transactions/{round}` (rounds 1–18).
   `type == "trade"` + `status == "complete"`. `adds`: player_id → receiving
