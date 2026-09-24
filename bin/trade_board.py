@@ -98,6 +98,65 @@ INJURY_DISCOUNT = {  # E5: discount stale values before RANKING (ADV-FF-10)
     "Doubtful": 0.7, "Questionable": 0.85,
 }
 
+def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
+    """FA NOW vs CLAIM (ADV-FF-18): a player dropped within the league's
+    waiver_clear_days sits on waivers (claim: clears Tuesday, burns his
+    priority slot); anything else is an instant free-agent add with no
+    priority cost. Wesley's 9/23 ruling: price priority only when a claim
+    is actually required."""
+    pid = str(pid)
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    try:
+        days = int(waiver_clear_days or 2)
+    except (TypeError, ValueError):
+        days = 2
+    dropped_at = recent_drops.get(pid)
+    if dropped_at and (now_ms - int(dropped_at)) < days * 86400 * 1000:
+        return "claim"
+    return "fa"
+
+def clear_label(league_settings):
+    """Waiver-clear wording. Sleeper waiver_day_of_week: 1 is verified
+    to clear at midnight at the end of Monday, going into Tuesday."""
+    dow = (league_settings or {}).get("waiver_day_of_week")
+    if dow == 1:
+        return "clears Tue 12:00am PT"
+    return f"clears (waiver day {dow} — unverified)"
+
+def slot_math(roster, rp, reserve_slots):
+    """Live active/bench/IR arithmetic (E14). Sleeper double-lists IR
+    occupants in `players`, so active = players minus the reserve
+    overlap; a roster is FULL when active >= len(roster_positions). Every
+    ADD/DROP the board emits is validated against this — the 9/23
+    Rodgers advice ("no drop needed") was built on a bad roster read
+    and this is the machine check that kills that class."""
+    pids = [str(x) for x in ((roster or {}).get("players") or [])]
+    res = {str(x) for x in ((roster or {}).get("reserve") or [])}
+    reserve_ids = [p for p in pids if p in res]
+    active = len(pids) - len(reserve_ids)
+    bench_max = len(rp or [])
+    slots, open_ = ir_capacity(reserve_slots, len(reserve_ids))
+    return {"active": active, "bench_max": bench_max,
+            "drop_needed": active >= bench_max,
+            "reserve_ids": reserve_ids, "ir_slots": slots, "ir_open": open_}
+
+def ir_move_valid(pid, reserve_ids, ir_open):
+    """IR-move gate (E14/ADV-FF-16): any recommendation to move a player
+    into the IR slot must pass this first. Catches the 9/23 no-op —
+    Pacheco was already in reserve, so the "move" freed no bench slot.
+    The caller must separately confirm IR eligibility from
+    injury_status; this function validates occupancy only."""
+    pid = str(pid)
+    if pid in {str(x) for x in (reserve_ids or [])}:
+        return (False, "already on IR — the move is a no-op")
+    try:
+        open_ = int(ir_open or 0)
+    except (TypeError, ValueError):
+        open_ = 0
+    if open_ <= 0:
+        return (False, "IR full — stashing here costs an active roster spot")
+    return (True, "ok")
+
 def injury_discount(status):
     """Value multiplier for an injury designation (E5)."""
     return INJURY_DISCOUNT.get(status or "", 1.0)
@@ -415,12 +474,24 @@ def main():
     print("=== LEAGUE TRADE HISTORY (market comps) ===")
     ntrades = 0
     all_trades = []  # G2: mined for manager trade profiles below
+    # ADV-FF-18: latest drop timestamp per player, from complete add/drop
+    # transactions — a drop inside waiver_clear_days is waiver-locked
+    # (CLAIM); anything else is an instant FA add.
+    recent_drops = {}
     for rnd in range(1, 19):
         try:
             txns = get(f"{SLEEPER}/league/{a.league}/transactions/{rnd}")
         except Exception:
             continue
         for t in txns:
+            if t.get("status") == "complete" and t.get("type") in (
+                    "free_agent", "waiver"):
+                _c = t.get("created") or 0
+                if _c:
+                    for _pid in (t.get("drops") or {}):
+                        _pid = str(_pid)
+                        if _c > recent_drops.get(_pid, 0):
+                            recent_drops[_pid] = _c
             if t.get("type") != "trade" or t.get("status") != "complete":
                 continue
             ntrades += 1
@@ -1023,6 +1094,22 @@ def main():
     for p in eff_slots:
         bench.extend(me["bypos"].get(p, [])[eff_slots[p]:])
     bench.sort(key=lambda x: x["val"])
+    # ADV-FF-18: every suggested ADD is labeled FA NOW (instant add, no
+    # priority cost) or CLAIM (waiver-locked: clears Tue, burns his slot)
+    # from the recent-drop timestamps — Wesley's 9/23 "FA or claim?" ask.
+    _clear_days = (league.get("settings") or {}).get("waiver_clear_days", 2)
+    _now_ms = int(time.time() * 1000)
+    _clear_lbl = clear_label(league.get("settings"))
+    _waiver_slot = waiver_slot(rosters, a.me)
+
+    def _path(fapid):
+        return acquisition_path(fapid, recent_drops, _clear_days, _now_ms)
+
+    def _pathtag(path):
+        if path == "claim":
+            return f" [CLAIM — {_clear_lbl}, burns #{_waiver_slot}]"
+        return " [FA NOW — instant add, no priority cost]"
+
     sug = []
     for pos in WPOS:
         if not fa_by_pos.get(pos):
@@ -1038,9 +1125,12 @@ def main():
             # starter must be replaced from the top healthy FAs.
             mine = sorted(me["bypos"].get(pos, []), key=lambda x: x["val"])
             if mine and fav > mine[0]["val"] * CHURN_THRESHOLD:
-                sug.append((fav - mine[0]["val"], fav, mine[0]["val"], False,
+                _p = _path(fapid)
+                sug.append((fav - mine[0]["val"], fav, mine[0]["val"],
+                            False, fapid, _p,
                             f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
-                            f"DROP {mine[0]['name']} ({pos},{mine[0]['val']})"))
+                            f"DROP {mine[0]['name']} ({pos},{mine[0]['val']})"
+                            + _pathtag(_p)))
             elif mine and not fainj:
                 cur = mine[0]
                 cur_inj = ((players.get(cur["id"], {}) or {})
@@ -1048,20 +1138,36 @@ def main():
                 if cur_inj in HURT:
                     # forced replacement: a hurt starter must be replaced —
                     # edge is 0 but NF-01 never flags a forced move
-                    sug.append((0, 0, cur["val"], True,
+                    _p = _path(fapid)
+                    sug.append((0, 0, cur["val"], True, fapid, _p,
                                 f"  ADD {fan} ({pos}) / "
                                 f"DROP {cur['name']} ({pos}) — "
-                                f"your {pos} is {cur_inj}"))
+                                f"your {pos} is {cur_inj}"
+                                + _pathtag(_p)))
             continue
         for b in bench:
             if fav > b["val"] * CHURN_THRESHOLD:
-                sug.append((fav - b["val"], fav, b["val"], False,
+                _p = _path(fapid)
+                sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
                             f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
-                            f"DROP {b['name']} ({b['pos']},{b['val']})"))
+                            f"DROP {b['name']} ({b['pos']},{b['val']})"
+                            + _pathtag(_p)))
                 break
     sug.sort(key=lambda t: t[0], reverse=True)
+    # E14: validate slot arithmetic before emitting — the 9/23 Rodgers
+    # "no drop needed" advice was built on a bad roster read (Pacheco was
+    # already in reserve; the roster was full). Live counts, not memory.
+    _my = next((r for r in rosters if r.get("owner_id") == a.me), None)
+    _sm = slot_math(_my, rp, ir_slots)
+    _res_names = ", ".join(pname(p) for p in _sm["reserve_ids"]) or "—"
+    _slot_state = ("FULL: every ADD needs a DROP" if _sm["drop_needed"]
+                   else (f"{_sm['bench_max'] - _sm['active']} open bench "
+                         "slot(s): adds need no drop"))
+    print(f"  slot check: active {_sm['active']}/{_sm['bench_max']} — "
+          f"{_slot_state} | IR: {_res_names} ({len(_sm['reserve_ids'])}/"
+          f"{_sm['ir_slots']} used, {_sm['ir_open']} open)")
     print("  suggested moves:")
-    for _, _, _, _, line in sug[:5]:
+    for _, _, _, _, _, _, line in sug[:5]:
         print(line)
     if not sug:
         print("  (no FA beats your droppable bench)")
@@ -1104,7 +1210,7 @@ def main():
     except Exception as e:  # noqa: BLE001
         print(f"    (unavailable: {str(e)[:100]})")
     # --- NF-01: waiver priority cost ---
-    slot = waiver_slot(rosters, a.me)
+    slot = _waiver_slot  # computed above (ADV-FF-18 needs it for CLAIM tags)
     print()
     print("=== WAIVER PRIORITY COST ===")
     if slot is None:
@@ -1113,7 +1219,7 @@ def main():
         scarce = slot <= SCARCE_SLOT_CUTOFF
         print(f"  {league.get('name')} waiver slot: {slot} of {num_teams}"
               + (" — SCARCE" if scarce else ""))
-        v_edges = [e for e, _, _, forced, _ in sug if not forced]
+        v_edges = [e for e, _, _, forced, _, _, _ in sug if not forced]
         typical = (sorted(v_edges)[len(v_edges) // 2] if v_edges
                    else TYPICAL_EDGE_FALLBACK)
         p, hv = hold_value(slot, num_teams, typical)
@@ -1125,7 +1231,12 @@ def main():
               f"{wire_richness(num_teams):.1f} wire richness)")
         if not sug:
             print("  (no suggested moves to price)")
-        for edge, _, dropv, forced, line in sug[:5]:
+        for edge, _, dropv, forced, _, path, line in sug[:5]:
+            if path == "fa":
+                # Wesley's 9/23 ruling: price priority only when a claim
+                # is actually required — FA-now adds cost nothing.
+                print(f"{line}\n    -> FA NOW: no priority cost")
+                continue
             verdict = slot_verdict(edge, dropv, slot, num_teams, forced)
             if verdict:
                 print(f"{line}\n    -> {verdict}")
