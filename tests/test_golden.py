@@ -98,6 +98,60 @@ check("ir_line: open IR shows dash names, no warning",
 check("ir_line: no IR slots -> no FULL warning",
       "IR FULL" not in tb.ir_line([], None, 0))
 
+# ---------------- ADV-FF-18 / E14: acquisition path + slot arithmetic ---
+_NOW = 1790203000000  # fixed "now" (ms) for deterministic tests
+check("acquisition_path: dropped 1 day ago (2-day lock) -> claim",
+      tb.acquisition_path("p1", {"p1": _NOW - 1 * 86400 * 1000}, 2, _NOW)
+      == "claim")
+check("acquisition_path: dropped 10 days ago -> fa",
+      tb.acquisition_path("p1", {"p1": _NOW - 10 * 86400 * 1000}, 2, _NOW)
+      == "fa")
+check("acquisition_path: exactly at the 2-day boundary -> fa (lock expired)",
+      tb.acquisition_path("p1", {"p1": _NOW - 2 * 86400 * 1000}, 2, _NOW)
+      == "fa")
+check("acquisition_path: never dropped -> fa",
+      tb.acquisition_path("p9", {}, 2, _NOW) == "fa")
+check("acquisition_path: bad waiver_clear_days falls back to 2",
+      tb.acquisition_path("p1", {"p1": _NOW - 1 * 86400 * 1000},
+                          None, _NOW) == "claim")
+check("clear_label: waiver_day_of_week 1 -> Tuesday midnight (verified)",
+      tb.clear_label({"waiver_day_of_week": 1}) == "clears Tue 12:00am PT")
+check("clear_label: unverified day is flagged, not asserted",
+      "unverified" in tb.clear_label({"waiver_day_of_week": 3}))
+
+# Sleeper double-lists IR occupants in `players`: active must subtract
+# the reserve overlap (the 9/23 Pacheco case: 17 listed, 1 in reserve,
+# 16 real roster slots).
+_R = {"players": ["a", "b", "c", "8205"], "reserve": ["8205"]}
+_sm = tb.slot_math(_R, ["QB", "RB", "BN"], 1)
+check("slot_math: active excludes reserve overlap",
+      _sm["active"] == 3 and _sm["reserve_ids"] == ["8205"],
+      f"got {_sm}")
+check("slot_math: full roster -> every ADD needs a DROP",
+      _sm["bench_max"] == 3 and _sm["drop_needed"] is True)
+check("slot_math: open bench -> no drop required",
+      (lambda s: s["active"] == 2 and s["drop_needed"] is False)(
+          tb.slot_math({"players": ["a", "b"], "reserve": []},
+                       ["QB", "RB", "BN"], 1)))
+check("slot_math: IR capacity from reserve_slots",
+      tb.slot_math(_R, ["QB", "RB", "BN"], 1)["ir_open"] == 0
+      and tb.slot_math({"players": ["a"], "reserve": []},
+                       ["QB"], 1)["ir_open"] == 1)
+check("slot_math: None roster degrades to zeros, no crash",
+      tb.slot_math(None, ["QB"], 1)["active"] == 0)
+
+check("ir_move_valid: player already in reserve -> no-op",
+      tb.ir_move_valid("8205", ["8205"], 0)
+      == (False, "already on IR — the move is a no-op"))
+check("ir_move_valid: IR full -> costs an active spot",
+      tb.ir_move_valid("999", ["8205"], 0)[0] is False
+      and "costs an active roster spot" in tb.ir_move_valid("999",
+                                                            ["8205"], 0)[1])
+check("ir_move_valid: open slot -> ok",
+      tb.ir_move_valid("999", [], 1)[0] is True)
+check("ir_move_valid: int pid matches str reserve entry",
+      tb.ir_move_valid(8205, ["8205"], 1)[0] is False)
+
 # ---------------- NF-01: waiver priority cost model ----------------
 _fake_rosters = [
     {"owner_id": "aaa", "roster_id": 1,
@@ -628,6 +682,24 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           "roster-clog audit (G8" in out)
     check(f"{tag}: IR audit line with capacity (E13)",
           re.search(r"  IR: .+ \(\d+/\d+ used, \d+ open\)", out) is not None)
+    # ADV-FF-18/E14: every suggested ADD carries an acquisition-path tag,
+    # and a slot-check line validates live roster math before emitting.
+    check(f"{tag}: slot-check line with live roster math (E14)",
+          re.search(r"  slot check: active \d+/\d+ — "
+                    r"(FULL: every ADD needs a DROP|open bench slot\(s\))",
+                    out) is not None)
+    _moves = [ln for ln in out.splitlines()
+              if ln.startswith("  ADD ") and " / DROP " in ln]
+    # A league can legitimately suggest no moves (rich wire, high churn
+    # bar) — then the tag rule is vacuously satisfied.
+    _untagged = [ln for ln in _moves
+                 if not re.search(r"\[(FA NOW|CLAIM) —", ln)]
+    check(f"{tag}: every suggested move has an FA NOW or CLAIM tag (ADV-FF-18)",
+          not _untagged, f"untagged moves: {_untagged}")
+    check(f"{tag}: CLAIM tag names clear time and slot (ADV-FF-18)",
+          not any("[CLAIM" in ln for ln in _moves)
+          or all("clears Tue 12:00am PT" in ln and "burns #" in ln
+                 for ln in _moves if "[CLAIM" in ln))
 
 out = run_board(SNAPUSA).stdout
 # ADV-FF-07: expectations derive from the live registry — the Pittman/Andrews
