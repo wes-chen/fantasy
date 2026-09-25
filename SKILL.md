@@ -32,7 +32,10 @@ share, air-yards share, snap%; routes are unavailable in every free
 source and are never synthesized), candidate swaps ranked by projected
 lineup-points delta for him (the marginal gain to *his* optimal starting
 lineup by FantasyCalc redraft value, not the smallest value gap —
-annotated with the value gap for fairness, bye weeks and bye-stack
+each row carries a fairness band on the value gap: <10% EXCELLENT,
+10–20% FAIR, 20–35% STRETCH, >35% UNFAIR, calibrated against this
+league's largest accepted gap, which the LEAGUE TRADE HISTORY section
+prints as the live edge of the bands every run), bye weeks and bye-stack
 warnings, and exactly who starts and who sits after the deal; lateral
 swaps where the incoming player can't crack his projected starting
 lineup are dropped outright), a 2-for-1 consolidation section (E3 —
@@ -184,7 +187,12 @@ be redundant):
 Ranked proposals, each with:
 - The exact swap (names, both sides).
 - Why it works for *them* (one line).
-- Value check: FantasyCalc gap + nearest league comp.
+- Value check: FantasyCalc gap + nearest league comp. Read the engine's
+  fairness band on the gap, not the raw percentage: a STRETCH gap in a
+  league whose history shows 50%+ gaps accepted (the calibration line in
+  LEAGUE TRADE HISTORY) is ordinary business in that market; a UNFAIR gap
+  with no comp is a non-starter. Never send a deal beyond the league's
+  observed edge without a comp to back it.
 - Opening offer, fallback, walk-away.
 - The one honest risk — especially any hole it creates in his roster.
 
