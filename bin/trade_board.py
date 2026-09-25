@@ -41,6 +41,22 @@ SCARCE_SLOT_MIN_EDGE = 0.75  # a scarce slot demands a >=75% value upgrade
 TYPICAL_EDGE_FALLBACK = 6.0  # assumed median pickup edge when this run
                       # suggests no moves; ~one flex-starter tier jump
 
+# --- E6: value-gap fairness bands (see gap-analysis E6) ---
+# A raw gap percentage is unanchored: is 25% "close enough"? Bands give the
+# persona a calibrated read, and the trade-history section prints this
+# league's largest accepted gap as the live calibration (recalibrated every
+# run as trades complete — a league that accepted 59% for a QB is a market
+# where STRETCH gaps are ordinary business).
+def fairness_band(gap):
+    """Fairness band for a value gap (fraction 0..1), from E6."""
+    if gap < 0.10:
+        return "EXCELLENT"
+    if gap <= 0.20:
+        return "FAIR"
+    if gap <= 0.35:
+        return "STRETCH"
+    return "UNFAIR"
+
 def wire_richness(num_teams):
     """Wire talent density: small-league wires are rich (replacement level
     is high, a better target almost always emerges); 14-team wires are a
@@ -474,6 +490,10 @@ def main():
     print("=== LEAGUE TRADE HISTORY (market comps) ===")
     ntrades = 0
     all_trades = []  # G2: mined for manager trade profiles below
+    # E6: league calibration — the largest accepted value gap this season
+    # is the live edge of the fairness bands (bands recalibrate every run
+    # as new trades complete).
+    calib_gap, calib_desc = 0.0, ""
     # ADV-FF-18: latest drop timestamp per player, from complete add/drop
     # transactions — a drop inside waiver_clear_days is waiver-locked
     # (CLAIM); anything else is an instant FA add.
@@ -516,10 +536,17 @@ def main():
                 rids = sorted(tot, key=int)
                 v0, v1 = tot[rids[0]], tot[rids[1]]
                 big = max(v0, v1) or 1
+                _g = abs(v0-v1)/big  # noqa: E226 - mirrors printed gap
                 print(f"    value: {v0} vs {v1} "
-                      f"({abs(v0-v1)/big:.0%} gap)")
+                      f"({_g:.0%} gap)")
+                if _g > calib_gap:
+                    calib_gap, calib_desc = _g, sides
     if not ntrades:
         print("  (no completed trades yet)")
+    else:
+        print(f"  league calibration: largest accepted gap this season "
+              f"{calib_gap:.0%} ({calib_desc}) — fairness bands read "
+              f"against this market, not a national chart")
     print()
     print("=== MANAGER TRADE PROFILES (G2: mined from this league's deals) ===")
     try:
@@ -589,7 +616,8 @@ def main():
         return (delta, f"  you send {mine['name']} ({mine['val']}){_btag(mine)}"
                        f" -> {partner}; "
                        f"you get {theirs['name']} ({theirs['val']}){_btag(theirs)} "
-                       f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}]{thin}{tag}")
+                       f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}|"
+                       f"{fairness_band(gap)}]{thin}{tag}")
 
     print("=== TEAM NEEDS (startable vs effective slots) ===")
     print(f"  effective slots: {eff_slots} (+{flex_slots} flex) | "
@@ -780,7 +808,8 @@ def main():
     # candidate 1-for-1s: your surplus -> their need, their surplus -> your need
     print("=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")
     print("  ranked by projected lineup-points delta for you; value gap shown "
-          "for fairness; incoming must crack your projected starting lineup")
+          "for fairness (bands: <10% EXCELLENT, 10-20% FAIR, 20-35% STRETCH, "
+          ">35% UNFAIR); incoming must crack your projected starting lineup")
     if pw_active:
         print("  G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)")
     my_need = need_score(me)
@@ -924,7 +953,7 @@ def main():
                     f"{partner}; you get {theirs['name']} "
                     f"({theirs['val']}){_btag(theirs)} "
                     f"[lineup {delta:+.0f}{fit}][gap vs combined "
-                    f"{gap:.0%}][frees 1 slot]{tag}")
+                    f"{gap:.0%}|{fairness_band(gap)}][frees 1 slot]{tag}")
 
         package = sorted(my_tradable, key=lambda t: -t[0]["val"])[:12]
         rows2, bye_dropped2 = [], 0
