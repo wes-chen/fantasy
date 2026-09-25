@@ -66,6 +66,15 @@ check("churn threshold is 1.4 (persona 40% veto)",
 check("WPOS covers K/DEF", "K" in tb.WPOS and "DEF" in tb.WPOS,
       f"got {tb.WPOS}")
 
+# ---------------- E6: fairness bands ----------------
+check("E6: band <10% -> EXCELLENT", tb.fairness_band(0.09) == "EXCELLENT")
+check("E6: band 10% -> FAIR (boundary)", tb.fairness_band(0.10) == "FAIR")
+check("E6: band 20% -> FAIR (boundary)", tb.fairness_band(0.20) == "FAIR")
+check("E6: band 21% -> STRETCH", tb.fairness_band(0.21) == "STRETCH")
+check("E6: band 35% -> STRETCH (boundary)",
+      tb.fairness_band(0.35) == "STRETCH")
+check("E6: band 36% -> UNFAIR", tb.fairness_band(0.36) == "UNFAIR")
+
 with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
     fh.write("# comment\n\n")
     fh.write("6819 | Michael Pittman | ydai | 2026-09-20 | pending | x\n")
@@ -700,6 +709,20 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           not any("[CLAIM" in ln for ln in _moves)
           or all("clears Tue 12:00am PT" in ln and "burns #" in ln
                  for ln in _moves if "[CLAIM" in ln))
+    # E6: fairness bands — legend in the swaps header, a band on every
+    # swap gap tag, and the league's largest accepted gap as the live
+    # calibration in the trade history section.
+    check(f"{tag}: fairness band legend (E6)",
+          "10-20% FAIR" in out and "20-35% STRETCH" in out)
+    _gaps = [ln for ln in out.splitlines()
+             if re.search(r"\[gap (vs combined )?\d+%", ln)]
+    _unbanded = [ln for ln in _gaps
+                 if not re.search(r"\|(EXCELLENT|FAIR|STRETCH|UNFAIR)\]", ln)]
+    check(f"{tag}: every swap gap carries a fairness band (E6)",
+          not _unbanded, f"unbanded: {_unbanded}")
+    check(f"{tag}: league calibration line or no-trades (E6)",
+          ("league calibration: largest accepted gap this season" in out)
+          or ("no completed trades yet" in out))
 
 out = run_board(SNAPUSA).stdout
 # ADV-FF-07: expectations derive from the live registry — the Pittman/Andrews
