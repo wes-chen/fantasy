@@ -61,6 +61,39 @@ check("injury discount healthy=1.0",
       tb.injury_discount("") == 1.0 and tb.injury_discount(None) == 1.0
       and tb.injury_discount("Probable") == 1.0)
 
+# ---------------- E5: season-timing injury discount ----------------
+_approx = lambda got, want: abs(got - want) < 1e-9
+check("E5: Out wk3 -> 0.5 (no timing decay)",
+      _approx(tb.injury_discount("Out", 3), 0.5))
+check("E5: Out wk8 -> 0.5*0.85=0.425",
+      _approx(tb.injury_discount("Out", 8), 0.425))
+check("E5: Out wk14 -> 0.5*0.6=0.3",
+      _approx(tb.injury_discount("Out", 14), 0.3))
+check("E5: IR decays with season progress",
+      _approx(tb.injury_discount("IR", 2), 0.5)
+      and _approx(tb.injury_discount("IR", 10), 0.425))
+check("E5: Doubtful wk7 -> 0.7*0.85=0.595",
+      _approx(tb.injury_discount("Doubtful", 7), 0.595))
+check("E5: Questionable stays static at 0.85 in every week",
+      tb.injury_discount("Questionable", 3) == 0.85
+      and tb.injury_discount("Questionable", 14) == 0.85)
+check("E5: Suspended stays static at 0.5",
+      tb.injury_discount("Suspended", 14) == 0.5)
+check("E5: week unknown -> current static behavior",
+      tb.injury_discount("Out") == 0.5
+      and tb.injury_discount("IR", None) == 0.5
+      and tb.injury_discount("Doubtful", None) == 0.7)
+check("E5: healthy stays 1.0 in every week",
+      tb.injury_discount("", 14) == 1.0
+      and tb.injury_discount("Probable", 14) == 1.0)
+check("E5: week bracket boundaries",
+      tb.injury_week_bracket(6) == 1.0
+      and tb.injury_week_bracket(7) == 0.85
+      and tb.injury_week_bracket(12) == 0.85
+      and tb.injury_week_bracket(13) == 0.6
+      and tb.injury_week_bracket(None) == 1.0)
+
+
 check("churn threshold is 1.4 (persona 40% veto)",
       tb.CHURN_THRESHOLD == 1.4, f"got {tb.CHURN_THRESHOLD}")
 check("WPOS covers K/DEF", "K" in tb.WPOS and "DEF" in tb.WPOS,
