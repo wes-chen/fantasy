@@ -53,7 +53,9 @@ since the previous scan, from our own timestamped snapshot history:
 NEW/HEATING/COOLING), a slot-check line validating live roster math
 before any suggestion emits (active vs max slots — Sleeper double-lists
 IR occupants in `players`, so the engine subtracts the reserve overlap;
-FULL means every ADD needs a DROP), add/drop suggestions vs his
+FULL means every ADD needs a DROP, and on a FULL roster the DROP is always
+an active-roster player — dropping an IR/reserve occupant frees no active
+bench slot, so reserve occupants never appear as drops there), add/drop suggestions vs his
 droppable bench with every ADD tagged [FA NOW] (instant add, no
 priority cost) or [CLAIM — clears Tue 12:00am PT, burns #N] from recent
 drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18),
