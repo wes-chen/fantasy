@@ -378,6 +378,28 @@ _V3N2 = fi.trending_velocity(
     {"9": {"full_name": "New Guy", "position": "RB"}}, set())
 check("G3: absent from previous snapshot -> NEW, never faked",
       _V3N2[0]["tag"] == "NEW" and _V3N2[0]["accel"] is None)
+# ranking: NEW (breakout signal) first, then HEATING, STEADY, COOLING
+_V3R = fi.trending_velocity(
+    {"n": 100, "h": 100, "s": 100, "c": 100},
+    {"ts": _NOW3 - 24 * 3600,
+     "counts": {"h": 40, "s": 100, "c": 400}},
+    {"n": {"full_name": "New", "position": "RB"},
+     "h": {"full_name": "Heat", "position": "RB"},
+     "s": {"full_name": "Steady", "position": "RB"},
+     "c": {"full_name": "Cold", "position": "RB"}}, set())
+check("G3: velocity ranking NEW < HEATING < STEADY < COOLING",
+      [r["sid"] for r in _V3R] == ["n", "h", "s", "c"],
+      f"got {[ (r['sid'], r['tag']) for r in _V3R ]}")
+_V3B2 = fi.trending_velocity(
+    {"b": 200, "e": 50},
+    {"ts": _NOW3 - 24 * 3600, "counts": {"b": 100, "e": 100}},
+    {"b": {"full_name": "Boundary Heat", "position": "RB"},
+     "e": {"full_name": "Boundary Cold", "position": "RB"}}, set())
+check("G3: threshold boundaries: 2.0x -> HEATING, 0.5x -> COOLING",
+      any(r["sid"] == "b" and r["tag"] == "HEATING" for r in _V3B2)
+      and any(r["sid"] == "e" and r["tag"] == "COOLING" for r in _V3B2),
+      f"got {[(r['sid'], r['accel'], r['tag']) for r in _V3B2]}")
+
 
 # one-call-per-scan regression: count Sleeper calls through a scan
 _CALLS3 = []
@@ -1052,6 +1074,18 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           == _g5expect)
     check(f"{tag}: G3 trending velocity line",
           "trending velocity (Sleeper-wide adds" in out)
+    _tline = next((ln for ln in out.splitlines()
+                   if "trending velocity (Sleeper-wide adds" in ln), "")
+    check(f"{tag}: G3 lookback window labeled in output",
+          "24h vs previous scan" in _tline, f"line: {_tline[:80]}")
+    _toks = (_tline.split(": ", 1)[1].split(", ")
+             if ": " in _tline and "(unavailable this run)" not in _tline
+             else [])
+    check(f"{tag}: G3 NEW/HEATING/COOLING tags render",
+          all(re.search(r"/24h,(NEW|x[\d.]+ vs prev \d+h "
+                        r"(HEATING|COOLING|STEADY))", e) for e in _toks),
+          f"untagged entries: "
+          f"{[e for e in _toks if not re.search(r'/24h,(NEW|x)', e)]}")
     check(f"{tag}: G1 routes-unavailable label",
           "routes are unavailable" in out)
     check(f"{tag}: G8 roster-clog audit line",
