@@ -975,6 +975,27 @@ check("G8: contingent-value handcuff outranks the clogger",
       _R8[-1]["name"] == "Cuff" and _R8[0]["name"] == "Blocked")
 check("G8: drops name the clogger, never on-block or handcuffs",
       _D8 == ["Clogger"])
+# every contingency type outranks a plain clogger at equal base value,
+# and the math matches the documented weights (handcuff x1.9, the
+# hurt-starter backup x2.1, rising usage x1.25)
+_R8B, _D8B = fi.clog_audit(
+    [{"sid": "1", "name": "Clogger", "pos": "WR", "val": 1000, "inj": ""},
+     {"sid": "2", "name": "Cuff", "pos": "RB", "val": 1000, "inj": ""},
+     {"sid": "3", "name": "HurtAhead", "pos": "RB", "val": 1000, "inj": ""},
+     {"sid": "4", "name": "Rising", "pos": "WR", "val": 1000, "inj": ""}],
+    handcuff_of={"2": True}, ahead_out={"3": True}, rising={"4": True})
+check("G8: contingent math matches the documented weights",
+      {r["name"]: r["contingent"] for r in _R8B}
+      == {"Clogger": 1000.0, "Cuff": 1900.0,
+          "HurtAhead": 2100.0, "Rising": 1250.0},
+      f"got {[(r['name'], r['contingent']) for r in _R8B]}")
+check("G8: every contingency outranks the plain clogger",
+      _R8B[0]["name"] == "Clogger"
+      and {r["name"] for r in _R8B[1:]}
+      == {"Cuff", "HurtAhead", "Rising"})
+check("G8: drops name only the unprotected clogger",
+      _D8B == ["Clogger"])
+
 
 # --- G9: bye craters ---
 _CR = fi.bye_craters({"1": 7, "2": 7, "3": 8}, ["1", "2", "3"],
@@ -1112,6 +1133,15 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: G6 free backup always carries the UNPROTECTED flag",
           all("UNPROTECTED" in ln for ln in _freelines),
           f"unflagged: {[ln for ln in _freelines if 'UNPROTECTED' not in ln]}")
+    # G8: rows carry contingent values, and every rendered tag names one
+    # of the three contingencies (handcuff / hurt-ahead / rising).
+    _g8sec = out.split("roster-clog audit (G8")[1].split("===")[0]
+    check(f"{tag}: G8 rows rank by contingent value",
+          re.search(r" -> contingent [\d.]+\)", _g8sec) is not None)
+    _g8tags = set(re.findall(r"\[[a-z-]+\]", _g8sec))
+    check(f"{tag}: G8 contingency tags use the named vocabulary",
+          _g8tags <= {"[handcuff]", "[ahead-out]", "[rising]"},
+          f"tags: {_g8tags}")
     check(f"{tag}: G3 trending velocity line",
           "trending velocity (Sleeper-wide adds" in out)
     _tline = next((ln for ln in out.splitlines()
