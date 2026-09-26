@@ -664,6 +664,47 @@ check("G10: big-favorite shootout signals fire",
 check("G10: no rostered pieces in a game means no signals",
       fi.start_sit_signals([_G10], {"p9": ("Other", "WR", "NE")}) == [])
 
+# --- G10 extras: edge cases (synthetic, no network) ---
+_PK = fi.parse_odds_item({"details": "PK", "overUnder": 40.0, "spread": 0.0,
+                          "homeTeamOdds": {"favorite": False,
+                                           "moneyLine": 100},
+                          "awayTeamOdds": {"favorite": False,
+                                           "moneyLine": -110}},
+                         "NE", "BUF")
+check("G10: PK details -> line 0.0, away team the favorite",
+      _PK is not None and _PK["line"] == 0.0 and _PK["fav"] == "NE")
+check("G10: non-dict odds item -> None",
+      fi.parse_odds_item(None, "A", "B") is None)
+_GAME = {"away": "ATL", "home": "GB", "fav": "GB", "dog": "ATL",
+         "line": 8.0, "total": 38.0, "open_total": 44.5,
+         "fav_impl": 23.0, "dog_impl": 15.0}
+_SIG2 = fi.start_sit_signals([_GAME], {"p1": ("My WR", "WR", "ATL")})
+check("G10: underdog pieces get the negative-script note",
+      any("negative script" in s for s in _SIG2))
+check("G10: grind total (<= 41.5) flags the fringe-FLEX fade",
+      any("grind total" in s for s in _SIG2))
+check("G10: total moved >= 2.0 from open prints the market-moved line",
+      any("market moved total down" in s for s in _SIG2))
+check("G10: cross-check line carries spread direction + implied totals",
+      any("GB -8.0 O/U 38.0 (impl GB 23.0, ATL 15.0)" in s
+          for s in _SIG2))
+
+# --- G10 live: ESPN core API odds (guarded; SKIP offline, never fail) ---
+try:
+    _wk = int((fi.fetch_json(f"{fi.SLEEPER}/state/nfl") or {})
+              .get("week") or 0)
+    _gp = fi.nflverse_paths(keys=("games",))
+    _priced, _errs = fi.fetch_week_odds(_gp["games"], _wk, season="2026")
+    _sane = (len(_priced) >= 10 and all(
+        all(k in g for k in ("away", "home", "fav", "dog", "line", "total",
+                             "fav_impl", "dog_impl"))
+        and "draft" in str(g.get("provider") or "").lower()
+        for g in _priced))
+    check(f"G10 live: ESPN core API priced {len(_priced)} games (wk {_wk})",
+          _sane, f"unpriced: {_errs[:3]}")
+except Exception as _e:  # noqa: BLE001 - degraded path: SKIP, not advice
+    print(f"  SKIP G10 live fetch_week_odds (offline/degraded): {_e}")
+
 # ---------------- integration ----------------
 print("== integration ==")
 
