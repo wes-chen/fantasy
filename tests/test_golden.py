@@ -808,6 +808,27 @@ check("G4/G7: league-name scoping (wrong league -> honest stub)",
       _other47 == ["  (snapshot has no section for this league yet)"],
       f"got {_other47}")
 
+# --- G12: schedule-luck table surfaces actual | expected | luck ---
+_G12P = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False)
+_G12P.write("## T (playoffs W15, 1 teams)\n"
+            "Wesley playoff probability: 100% — CONTENDER\n"
+            "| team | W-L | PF/G | playoff% | exp wins |\n"
+            "|---|---|---|---|---|\n"
+            "| Wesley | 2-0 | 145.0 | 100% | 2.0 | <-- YOU\n"
+            "\n### Schedule luck (all-play expected wins)\n"
+            "| team | actual | expected | luck |\n"
+            "|---|---|---|---|\n"
+            "| Wesley | 2 | 1.0 | +1.0 | <-- YOU\n"
+            "| Rival | 0 | 1.0 | -1.0 |\n")
+_G12P.close()
+_G12 = tb.playoff_snapshot_lines("T", path=_G12P.name)
+os.unlink(_G12P.name)
+check("G12: schedule-luck row surfaces actual | expected | luck",
+      any("| Wesley | 2 | 1.0 | +1.0 |" in ln for ln in _G12),
+      f"lines={_G12}")
+check("G12: luck row is the board's all-play expected-wins math, not a fake",
+      not any("snapshot has no section" in ln for ln in _G12))
+
 # --- G6: UNPROTECTED flag logic (E8: free backup -> uninsured starter) ---
 _HR = fi.render_handcuff_lines([
     {"starter": "Lead Back", "team": "KC", "lead": True,
