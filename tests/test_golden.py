@@ -662,6 +662,77 @@ _HM3 = fi.handcuff_map(_DEP, ["s3"], {"9": ["s1", "s3"]}, _PL6,
 check("G6: my RB who is not the lead is flagged",
       _HM3[0]["lead"] is False)
 
+# ---------------- E2/G1/G2/G4/G7/G9: verify-or-implement rounds -----
+print("== E2/G1/G2/G4/G7/G9 verification ==")
+
+
+def _section(out, hdr):
+    """Body lines of a printed board section (header-excluded, blank-skipped)."""
+    i = out.find(hdr)
+    assert i >= 0, f"header missing: {hdr}"
+    lines = out[i:].splitlines()
+    end = next((j for j in range(1, len(lines))
+                if lines[j].startswith("===")), len(lines))
+    return [ln for ln in lines[1:end] if ln.strip()]
+
+
+# --- E2: module-level swap_delta with synthetic inputs ---
+# lineup = top 6 by value: q1(100) w1(95) r1(90) w2(85) r2(80) r3(70) = 520
+_E2P = {
+    "QB": [{"id": "q1", "name": "My QB", "pos": "QB", "val": 100}],
+    "RB": [{"id": "r1", "name": "My RB1", "pos": "RB", "val": 90},
+           {"id": "r2", "name": "My RB2", "pos": "RB", "val": 80},
+           {"id": "r3", "name": "My RB3", "pos": "RB", "val": 70}],
+    "WR": [{"id": "w1", "name": "My WR1", "pos": "WR", "val": 95},
+           {"id": "w2", "name": "My WR2", "pos": "WR", "val": 85}],
+    "TE": [{"id": "t1", "name": "My TE1", "pos": "TE", "val": 60}],
+}
+_E2LIN = lambda bp: sorted(  # noqa: E731 - synthetic test helper
+    [x for lst in bp.values() for x in lst],
+    key=lambda x: -x["val"])[:6]
+_E2MY = _E2LIN(_E2P)
+_E2CTX = dict(me_bypos=_E2P, dval_for=lambda x: x["val"],
+              lineup_ids_fn=_E2LIN,
+              my_lineup_dval=sum(x["val"] for x in _E2MY),
+              my_lineup=_E2MY,
+              my_lineup_ids={x["id"] for x in _E2MY}, fp={})
+_MINE3 = {"id": "r3", "name": "My RB3", "pos": "RB", "val": 70}
+_lat = dict(_E2CTX)
+_d_lat, _s_lat, _st_lat, _v_lat = tb.swap_delta(
+    _MINE3, {"id": "x1", "name": "Lateral RB", "pos": "RB", "val": 70},
+    **_lat)
+check("E2: lateral equal-value swap that can't crack the lineup -> "
+      "delta<=0 (board drops it)",
+      _d_lat <= 0 and _v_lat is False, f"delta={_d_lat}")
+_d_pos, _s_pos, _st_pos, _v_pos = tb.swap_delta(
+    _MINE3, {"id": "x2", "name": "Stud RB", "pos": "RB", "val": 100},
+    **_E2CTX)
+check("E2: upgrade swap -> positive delta, incoming starts, outgoing sits",
+      _d_pos == 30 and _st_pos == ["Stud RB"] and _s_pos == ["My RB3"]
+      and _v_pos is False,
+      f"delta={_d_pos} starts={_st_pos} sits={_s_pos}")
+# the board's row filter + sort: delta<=0 never ranks, positive first
+_rows = sorted([(d, ln) for d, ln in
+                ((_d_lat, "lateral"), (_d_pos, "upgrade")) if d > 0],
+               reverse=True)
+check("E2: lateral dropped by the delta<=0 filter; positive ranks first",
+      _rows and _rows[0][1] == "upgrade" and len(_rows) == 1,
+      f"rows={_rows}")
+_veto_ctx = dict(_E2CTX, fp={"x3": (7, None, None), "q1": (7, None, None),
+                             "w1": (7, None, None), "r1": (7, None, None)})
+_d_v, _, _, _veto = tb.swap_delta(
+    _MINE3, {"id": "x3", "name": "Bye RB", "pos": "RB", "val": 200},
+    **_veto_ctx)
+check("E2: incoming pushing a bye week to 4+ starters is vetoed",
+      _veto is True, f"delta={_d_v} veto={_veto}")
+_pen_ctx = dict(_E2CTX, fp={"x3": (7, None, None), "q1": (7, None, None),
+                            "w1": (7, None, None)})
+_d_p, _, _, _veto_p = tb.swap_delta(
+    _MINE3, {"id": "x3", "name": "Bye RB", "pos": "RB", "val": 200},
+    **_pen_ctx)
+check("E2: 3-starter bye cluster takes the 20% penalty, not the veto",
+      _veto_p is False and abs(_d_p - (650 - 520 - 0.20 * 200)) < 1e-9,
+      f"delta={_d_p} veto={_veto_p}")
 # --- G6: UNPROTECTED flag logic (E8: free backup -> uninsured starter) ---
 _HR = fi.render_handcuff_lines([
     {"starter": "Lead Back", "team": "KC", "lead": True,
