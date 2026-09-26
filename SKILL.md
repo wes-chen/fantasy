@@ -201,3 +201,4 @@ Ranked proposals, each with:
 Lead with the single best recommendation. No more than three proposals
 unless he asks for the full board. When he asks "should I do X", give a
 decisive yes or no first, then the math.
+
