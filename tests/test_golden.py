@@ -1148,6 +1148,33 @@ check("G2: real profiles render frequency + position prefs + net value "
       or any("(unavailable" in ln for ln in _G2),
       f"profiles section: {_G2[:2]}")
 
+# --- G9: bye-crater forecast live-section checks ---
+_nflw = int(re.search(r"NFL Week (\d+)", out_snap).group(1))
+_G9 = _section(out_snap, "=== BYE-CRATER FORECAST (G9")
+if any("(unavailable" in ln for ln in _G9):
+    check("G9: forecast horizon is the next 4 weeks (degraded this run)",
+          True)
+else:
+    _wks = [int(x) for ln in _G9
+            for x in re.findall(r"^  W(\d+):", ln)]
+    check("G9: forecast covers exactly the next 4 weeks after the current "
+          "one", _wks == [_nflw + 1, _nflw + 2, _nflw + 3, _nflw + 4],
+          f"got {_wks}")
+    check("G9: current week is excluded (E1 owns the current week)",
+          not any(re.match(rf"^  W{_nflw}:", ln) for ln in _G9),
+          f"section: {_G9[:2]}")
+    _named_ok = True
+    for _ln in _G9:
+        _mm = re.search(r"\((\d+) starters?(?:: ([^)]*))?\)", _ln)
+        if _mm and int(_mm.group(1)) > 0 and not (_mm.group(2) or "").strip():
+            _named_ok = False
+    check("G9: affected starters are named when any are on bye", _named_ok,
+          f"section: {_G9}")
+    check("G9: 2+ starters on bye gets the CRATER flag",
+          all("<-- CRATER (2+ starters out)" in _ln for _ln in _G9
+              if re.search(r"\(([2-9]\d*) starters:", _ln)),
+          f"section: {_G9}")
+
 print()
 if failures:
     print(f"{len(failures)} FAILURES: {failures}")
