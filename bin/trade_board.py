@@ -1111,6 +1111,12 @@ def main():
                   f"trading him leaves you with "
                   f"{me['startable'].get(mp, 0) - 1} startable {mp}")
     print()
+    # E8 weekly handcuff audit: RB-only by design (see fi.handcuff_map
+    # docstring) — the handcuff is a contingent-value concept; only RB
+    # backups inherit a full workload. Header text below is byte-frozen
+    # (a downstream Tuesday worker parses it); the per-line rendering
+    # lives in fi.render_handcuff_lines so the free->UNPROTECTED flag
+    # logic is unit-testable.
     print("=== HANDCUFF LEVERAGE MAP (G6: each of your RBs' direct backup) ===")
     hm_cache = []  # stashed for the G8 clog audit
     try:
@@ -1125,17 +1131,8 @@ def main():
                                    _rids, my_rid)
         if not hm_cache:
             print("  (no RBs on your roster)")
-        for h in hm_cache:
-            if h["lead"]:
-                _backs = ", ".join(
-                    f"{b['name']} [{b['status']}]" for b in h["backups"])
-                _flag = ("  <-- UNPROTECTED"
-                         if any(b["status"] == "free" for b in h["backups"])
-                         else "")
-                print(f"  {h['starter']} ({h['team']} RB1): "
-                      f"backup {_backs or '(no listed backup)'}{_flag}")
-            else:
-                print(f"  {h['starter']}: {h.get('note') or 'no data'}")
+        for _line in fi.render_handcuff_lines(hm_cache):
+            print(_line)
     except Exception as e:  # noqa: BLE001 - snap-share fallback, then stub
         _fb = []
         try:
