@@ -178,6 +178,20 @@ def injury_discount(status):
     return INJURY_DISCOUNT.get(status or "", 1.0)
 
 
+def legal_drops(bench, reserve_ids, drop_needed):
+    """DROP candidates for a legal ADD/DROP pair (E14 follow-up).
+
+    When the roster is FULL, dropping an IR/reserve occupant frees no
+    ACTIVE bench slot — the ADD would have nowhere to go. So on a full
+    roster the drop must come from the active roster; when slots are open,
+    any bench player (including reserve occupants) is a legal drop.
+    """
+    res = {str(x) for x in (reserve_ids or [])}
+    if drop_needed:
+        return [b for b in bench if str(b.get("id")) not in res]
+    return list(bench)
+
+
 def ir_capacity(reserve_slots, reserve_count):
     """IR-slot accounting (E13): returns (slots, open).
 
@@ -1139,6 +1153,13 @@ def main():
             return f" [CLAIM — {_clear_lbl}, burns #{_waiver_slot}]"
         return " [FA NOW — instant add, no priority cost]"
 
+    # E14 follow-up: slot math must be known BEFORE suggestions emit — on a
+    # FULL roster the DROP must be an active player, since dropping an
+    # IR/reserve occupant frees no active bench slot.
+    _my = next((r for r in rosters if r.get("owner_id") == a.me), None)
+    _sm = slot_math(_my, rp, ir_slots)
+    _drop_pool = legal_drops(bench, _sm["reserve_ids"], _sm["drop_needed"])
+
     sug = []
     for pos in WPOS:
         if not fa_by_pos.get(pos):
@@ -1152,7 +1173,11 @@ def main():
             # No value feed prices K/DEF, so the value gate only fires if
             # one ever appears; the fallback is a health signal — a hurt
             # starter must be replaced from the top healthy FAs.
-            mine = sorted(me["bypos"].get(pos, []), key=lambda x: x["val"])
+            # The drop pool honors the FULL-roster rule (reserve occupants
+            # can't free an active slot).
+            mine = legal_drops(sorted(me["bypos"].get(pos, []),
+                                      key=lambda x: x["val"]),
+                               _sm["reserve_ids"], _sm["drop_needed"])
             if mine and fav > mine[0]["val"] * CHURN_THRESHOLD:
                 _p = _path(fapid)
                 sug.append((fav - mine[0]["val"], fav, mine[0]["val"],
@@ -1174,7 +1199,7 @@ def main():
                                 f"your {pos} is {cur_inj}"
                                 + _pathtag(_p)))
             continue
-        for b in bench:
+        for b in _drop_pool:
             if fav > b["val"] * CHURN_THRESHOLD:
                 _p = _path(fapid)
                 sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
@@ -1186,8 +1211,7 @@ def main():
     # E14: validate slot arithmetic before emitting — the 9/23 Rodgers
     # "no drop needed" advice was built on a bad roster read (Pacheco was
     # already in reserve; the roster was full). Live counts, not memory.
-    _my = next((r for r in rosters if r.get("owner_id") == a.me), None)
-    _sm = slot_math(_my, rp, ir_slots)
+    # (_sm computed above, before suggestion generation.)
     _res_names = ", ".join(pname(p) for p in _sm["reserve_ids"]) or "—"
     _slot_state = ("FULL: every ADD needs a DROP" if _sm["drop_needed"]
                    else (f"{_sm['bench_max'] - _sm['active']} open bench "
