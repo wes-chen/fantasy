@@ -200,6 +200,51 @@ def injury_discount(status, nfl_week=None):
     return base
 
 
+def value_range(val, trend30d):
+    """E7: per-player value RANGE from 30-day trend volatility.
+
+    Single-point FantasyCalc values overstate precision. The 30-day
+    trend is the signed drift over the last month; treat half its
+    magnitude as the +/- uncertainty band around the point value — a
+    move inside that band isn't distinguishable from recent noise.
+    Returns (lo, hi) as ints, lo clamped at 0."""
+    try:
+        half = abs(int(trend30d or 0)) / 2
+    except (TypeError, ValueError):
+        half = 0.0
+    v = val or 0
+    return (max(0, int(v - half)), int(v + half))
+
+
+# E7: a swap is a "low-signal lateral" when FantasyCalc itself doesn't
+# consider either side's 30-day move worth displaying (displayTrend False
+# on both sides) AND the projected lineup gain is under this fraction of
+# the larger point value. Flagged, not dropped — fit/bye reasons can
+# still justify the deal.
+FLAT_TREND_DELTA_FRAC = 0.10
+
+
+def low_signal_lateral(mine_disp, theirs_disp, delta, mine_val, theirs_val):
+    """E7: the "this move matters" filter — flag, don't drop.
+
+    Both 30-day trends flat (FC displayTrend False on both sides) plus a
+    small lineup delta relative to the point values = a lateral move the
+    numbers alone can't justify. Returns a flag string, or "" when the
+    move carries a real signal."""
+    if mine_disp or theirs_disp:
+        return ""
+    try:
+        big = max(float(mine_val), float(theirs_val))
+    except (TypeError, ValueError):
+        big = 0.0
+    if big <= 0:
+        return ""
+    if delta < FLAT_TREND_DELTA_FRAC * big:
+        return (" [LOW-SIGNAL LATERAL: both 30-day trends flat, "
+                "lineup delta small]")
+    return ""
+
+
 def legal_drops(bench, reserve_ids, drop_needed):
     """DROP candidates for a legal ADD/DROP pair (E14 follow-up).
 
@@ -340,14 +385,16 @@ def main():
 
     # FantasyCalc values matched to league settings
     fc = get(f"{FC}?isDynasty=false&numQbs={num_qbs}&numTeams={num_teams}&ppr={ppr}")
-    fval = {}  # sleeper_id -> (value, positionRank, overallRank, trend30Day)
+    fval = {}  # sleeper_id -> (value, positionRank, overallRank,
+              # trend30Day, displayTrend)  # E7: FC's own "this move matters" flag
     for e in fc:
         p = e.get("player") or {}
         sid = str(p.get("sleeperId") or "")
         if sid:
             fval[sid] = (e.get("redraftValue") or e.get("value") or 0,
                          e.get("positionRank") or 999,
-                         e.get("overallRank") or 999, e.get("trend30Day") or 0)
+                         e.get("overallRank") or 999, e.get("trend30Day") or 0,
+                         bool(e.get("displayTrend")))
 
     # --- season clock: current NFL week + trade deadline -> posture ---
     try:
@@ -434,7 +481,12 @@ def main():
         return pweight.get(nkey_of_pid(pid), (1.0, ""))[1]
 
     def ftrend(sid):
-        return fval.get(str(sid), (0, 999, 999, 0))[3]
+        return fval.get(str(sid), (0, 999, 999, 0, False))[3]
+
+    def fdisplay(sid):
+        """E7: FantasyCalc's own 'this move matters' flag (True when the
+        30-day trend is big enough for FC to display)."""
+        return fval.get(str(sid), (0, 999, 999, 0, False))[4]
 
     def fstr(sid, val):
         t = ftrend(sid)
@@ -475,7 +527,7 @@ def main():
         plist = []
         for pid in (r.get("players") or []):
             pos = ppos(pid)
-            v, pr, ovr, _ = fval.get(str(pid), (0, 999, 999, 0))
+            v, pr, ovr, _, _ = fval.get(str(pid), (0, 999, 999, 0, False))
             plist.append({"id": str(pid), "name": pname(pid), "pos": pos,
                           "val": v, "prank": pr})
         bypos = {}
@@ -649,11 +701,18 @@ def main():
         if starts:
             fit = ("; " + ", ".join(starts) + " starts" +
                    (", " + ", ".join(sits) + " sits" if sits else ""))
-        return (delta, f"  you send {mine['name']} ({mine['val']}){_btag(mine)}"
+        # E7: value range from 30-day volatility + the "this move matters"
+        # filter (FC displayTrend = the flat-trend signal).
+        mlo, mhi = value_range(mine["val"], ftrend(mine["id"]))
+        tlo, thi = value_range(theirs["val"], ftrend(theirs["id"]))
+        lsig = low_signal_lateral(fdisplay(mine["id"]),
+                                  fdisplay(theirs["id"]), delta,
+                                  mine["val"], theirs["val"])
+        return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}"
                        f" -> {partner}; "
-                       f"you get {theirs['name']} ({theirs['val']}){_btag(theirs)} "
+                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)} "
                        f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}|"
-                       f"{fairness_band(gap)}]{thin}{tag}")
+                       f"{fairness_band(gap)}]{thin}{tag}{lsig}")
 
     print("=== TEAM NEEDS (startable vs effective slots) ===")
     print(f"  effective slots: {eff_slots} (+{flex_slots} flex) | "
@@ -782,7 +841,7 @@ def main():
         for p in eff_slots:
             for x in me["bypos"].get(p, []):
                 _, ecr, _ = fp.get(x["id"], (None, None, None))
-                fcovr = fval.get(x["id"], (0, 999, 999, 0))[2]
+                fcovr = fval.get(x["id"], (0, 999, 999, 0, False))[2]
                 if not ecr or fcovr >= 999:
                     continue
                 d = fcovr - ecr
@@ -846,6 +905,9 @@ def main():
     print("  ranked by projected lineup-points delta for you; value gap shown "
           "for fairness (bands: <10% EXCELLENT, 10-20% FAIR, 20-35% STRETCH, "
           ">35% UNFAIR); incoming must crack your projected starting lineup")
+    print("  value ranges: (point, lo-hi) from 30-day trend volatility "
+          "(+/- half the 30d drift); [LOW-SIGNAL LATERAL] = both 30-day "
+          "trends flat (FC displayTrend) with a small lineup delta")
     if pw_active:
         print("  G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)")
     my_need = need_score(me)
@@ -985,11 +1047,15 @@ def main():
             tag = " [THINS THEM]" if thins_them else ""
             fit = ("; " + theirs["name"] + " starts"
                    + (", " + ", ".join(sits) + " sits" if sits else ""))
+            # E7: value ranges from 30-day volatility, same as 1-for-1s.
+            alo, ahi = value_range(a["val"], ftrend(a["id"]))
+            blo, bhi = value_range(b["val"], ftrend(b["id"]))
+            tlo, thi = value_range(theirs["val"], ftrend(theirs["id"]))
             return (delta,
-                    f"  you send {a['name']} ({a['val']}) + "
-                    f"{b['name']} ({b['val']}){_btag(a)}{_btag(b)} -> "
+                    f"  you send {a['name']} ({a['val']}, {alo}-{ahi}) + "
+                    f"{b['name']} ({b['val']}, {blo}-{bhi}){_btag(a)}{_btag(b)} -> "
                     f"{partner}; you get {theirs['name']} "
-                    f"({theirs['val']}){_btag(theirs)} "
+                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)} "
                     f"[lineup {delta:+.0f}{fit}][gap vs combined "
                     f"{gap:.0%}|{fairness_band(gap)}][frees 1 slot]{tag}")
 
@@ -1113,7 +1179,7 @@ def main():
         if str(pid) in rostered:
             continue
         pid_s = str(pid)
-        v = fval.get(pid_s, (0, 999, 999, 0))[0]
+        v = fval.get(pid_s, (0, 999, 999, 0, False))[0]
         inj = p.get("injury_status") or ""
         fa_by_pos.setdefault(pos, []).append(
             (v, p.get("full_name") or pid_s, inj, pid_s))
@@ -1146,7 +1212,7 @@ def main():
         if _row["pos"] not in WPOS:
             continue
         _pid = _row["sid"]
-        v = fval.get(_pid, (0, 999, 999, 0))[0]
+        v = fval.get(_pid, (0, 999, 999, 0, False))[0]
         inj = (players.get(_pid, {}) or {}).get("injury_status") or ""
         _vel = (f"x{_row['accel']} vs {_row['base']} {_row['tag']}"
                 if _row["accel"] is not None else "NEW")
