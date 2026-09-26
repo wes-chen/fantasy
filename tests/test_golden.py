@@ -628,6 +628,47 @@ check("G5: only the requested season's slate is used",
       _OS5.get("KC") == [(15, "JAX")] and _MS5 == [],
       f"KC rows: {_OS5.get('KC')}, missing={_MS5}")
 
+# G5 clamp boundaries: the softest possible slate hits exactly 1.10, the
+# toughest exactly 0.90 (the 0.85 playoff-bye override is a separate,
+# documented design choice — a bye in W15-17 scores a zero).
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2026,REG,15,AAA,D1\n2026,REG,16,AAA,D1\n2026,REG,17,AAA,D1\n"
+              "2026,REG,15,BBB,D2\n2026,REG,16,BBB,D2\n2026,REG,17,BBB,D2\n")
+    _GCL = _fh.name
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season_type,position,opponent_team,game_id,"
+              "rushing_yards,rushing_tds\n"
+              "REG,RB,D1,g1,200,2\nREG,RB,D2,g2,10,0\n")
+    _SCL = _fh.name
+_PCL = fi.playoff_multipliers(
+    _GCL, _SCL,
+    {("softest", "AAA", "RB"): ("AAA", "RB"),
+     ("toughest", "BBB", "RB"): ("BBB", "RB")},
+    (15, 16, 17))
+os.unlink(_GCL)
+os.unlink(_SCL)
+check("G5: clamp boundary: softest possible slate = 1.10 exactly",
+      _PCL[("softest", "AAA", "RB")][0] == 1.10,
+      f"got {_PCL[('softest', 'AAA', 'RB')]}")
+check("G5: clamp boundary: toughest possible slate = 0.90 exactly",
+      _PCL[("toughest", "BBB", "RB")][0] == 0.90,
+      f"got {_PCL[('toughest', 'BBB', 'RB')]}")
+check("G5: playoff-bye override is 0.85 by design (not the 0.9-1.1 clamp)",
+      _PB[("bye back", "KC", "RB")] == (0.85, "[PLAYOFF BYE W16]")
+      and fi.G5_BYE_MULT == 0.85)
+
+# G5 gating: Week-5 season-clock gate (the comment at trade_board.py ~400)
+check("G5: gate off before Week 5 (weights must not move early deals)",
+      tb.g5_active(4, {("a", "KC", "RB"): (1.1, "[P+ soft]")}) is False)
+check("G5: gate on from Week 5",
+      tb.g5_active(5, {("a", "KC", "RB"): (1.1, "[P+ soft]")}) is True)
+check("G5: gate off when the nflverse fetch produced no multipliers",
+      tb.g5_active(9, {}) is False
+      and tb.g5_active(17, None) is False)
+
 # --- G6: handcuff map ---
 with tempfile.NamedTemporaryFile("w", suffix=".csv",
                                  delete=False) as _fh:
@@ -996,6 +1037,19 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         check(f"{tag}: header stable: {hdr[:30]}...", hdr in out)
     check(f"{tag}: hold-vs-spend line present",
           "hold-vs-spend" in out and "P(better target emerges" in out)
+    # G5 gate: the weight lines print iff Week >= 5 AND the nflverse
+    # fetch produced multipliers (G1 degrades -> no multipliers).
+    _wk = int(re.search(r"NFL Week (\d+) \|", out).group(1))
+    _g1sec = out.split("=== USAGE-GAP RADAR (G1")[1].split(
+        "=== CANDIDATE SWAPS")[0]
+    _g5expect = _wk >= 5 and "(unavailable this run" not in _g1sec
+    check(f"{tag}: G5 swap note gated (present iff Week>=5 with data)",
+          ("G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)"
+           in out) == _g5expect,
+          f"week={_wk} expected={_g5expect}")
+    check(f"{tag}: G5 roster legend gated with the weights",
+          ("[P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal" in out)
+          == _g5expect)
     check(f"{tag}: G3 trending velocity line",
           "trending velocity (Sleeper-wide adds" in out)
     check(f"{tag}: G1 routes-unavailable label",
