@@ -173,9 +173,31 @@ def ir_move_valid(pid, reserve_ids, ir_open):
         return (False, "IR full — stashing here costs an active roster spot")
     return (True, "ok")
 
-def injury_discount(status):
-    """Value multiplier for an injury designation (E5)."""
-    return INJURY_DISCOUNT.get(status or "", 1.0)
+# E5 timing bracket: a season-ending-style injury hurts less early in the
+# year (the player may return and contribute) than late (the season is
+# nearly over). Applies to Out/IR/Doubtful only — Questionable and
+# Suspended keep their static multipliers.
+def injury_week_bracket(nfl_week):
+    """Timing multiplier for season-long injury designations (E5)."""
+    if nfl_week is None or nfl_week <= 6:
+        return 1.0
+    if nfl_week <= 12:
+        return 0.85
+    return 0.6
+
+
+def injury_discount(status, nfl_week=None):
+    """Value multiplier for an injury designation (E5).
+
+    ADV-FF-10 applied the static status multiplier; E5 adds the season
+    timing: Out/IR/Doubtful decay as the season progresses (an 8-week
+    injury in Week 12 is worth far less than the same injury in Week 3).
+    Pass nfl_week=None (the default) for the static behavior when the
+    week is unknown."""
+    base = INJURY_DISCOUNT.get(status or "", 1.0)
+    if status in ("Out", "IR", "Doubtful"):
+        base *= injury_week_bracket(nfl_week)
+    return base
 
 
 def legal_drops(bench, reserve_ids, drop_needed):
@@ -833,10 +855,12 @@ def main():
 
     def dval_for(x):
         """FantasyCalc value with the E5 injury discount applied
-        (ADV-FF-10: stale values must not rank first) and the G5
+        (ADV-FF-10 static status multiplier + E5 season-timing bracket for
+        Out/IR/Doubtful, from this run's NFL week — injured-player values
+        visibly decay as the season progresses) and the G5
         playoff-schedule weight (x0.9-1.1 from Week 5)."""
         st = (players.get(str(x["id"]), {}) or {}).get("injury_status") or ""
-        return x["val"] * injury_discount(st) * pw_of(x["id"])
+        return x["val"] * injury_discount(st, nfl_week) * pw_of(x["id"])
 
     def disc_lineup(bypos):
         return lineup_ids({p: [dict(x, val=dval_for(x)) for x in lst]
