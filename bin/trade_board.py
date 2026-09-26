@@ -313,6 +313,69 @@ def load_pending_offers(path):
                                  "notes": parts[5] if len(parts) > 5 else ""}
     return onblock
 
+def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
+               my_lineup_dval, my_lineup, my_lineup_ids, fp):
+    """Lineup-points delta of the 1-for-1 swap for you: who starts, who sits.
+
+    E2: swaps are ranked by this delta, not by the FantasyCalc value gap —
+    equal calc value that can't crack your projected starting lineup buys
+    zero lineup gain. Values are injury-discounted (E5/ADV-FF-10); a swap
+    that would push a bye week to 4+ projected starters is vetoed, 3
+    starters take a 20% penalty (completes E1/ADV-FF-15).
+
+    me_bypos: your {pos: [player dicts]}; dval_for: discounted value fn;
+    lineup_ids_fn: projected-lineup fn; my_lineup_dval: current lineup
+    total; my_lineup/my_lineup_ids: current lineup; fp: {sid: (bye, ecr,
+    ...)} for the bye-cluster veto. Returns (delta, sits, starts, bye_veto).
+    """
+    new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
+                     if x["id"] != mine["id"]]
+                 for p, lst in me_bypos.items()}
+    new_bypos.setdefault(theirs["pos"], []).append(
+        dict(theirs, val=dval_for(theirs)))
+    new_lineup = lineup_ids_fn(new_bypos)
+    new_ids = {x["id"] for x in new_lineup}
+    delta = sum(x["val"] for x in new_lineup) - my_lineup_dval
+    bye_veto = False
+    tb = fp.get(theirs["id"], (None, None, None))[0]
+    if tb:
+        others = sum(1 for x in new_lineup if x["id"] != theirs["id"]
+                     and fp.get(x["id"], (None, None, None))[0] == tb)
+        if others >= 3:
+            bye_veto = True  # would push the bye week to 4+ starters
+        elif others == 2:
+            delta -= 0.20 * dval_for(theirs)  # 3-starter cluster penalty
+    sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
+    starts = [x["name"] for x in new_lineup
+              if x["id"] not in my_lineup_ids]
+    return delta, sits, starts, bye_veto
+
+def playoff_snapshot_lines(league_name, path=None):
+    """Printed lines for the G4/G7 board section from the weekly snapshot.
+
+    Parses the playoff-odds.md snapshot the G4 weekly job writes:
+    Wesley's playoff-probability + posture line, his PF/G + playoff% +
+    expected-wins row, and his schedule-luck row (actual vs expected
+    wins). Raises FileNotFoundError when the snapshot is missing or
+    stale (>72h) — the board catches it and prints the degraded stub.
+    """
+    path = path or os.path.join(fi.GOAL_DIR, "hidden_files",
+                                "playoff-odds.md")
+    if (time.time() - os.stat(path).st_mtime) / 3600 > 72:
+        raise FileNotFoundError("stale snapshot")
+    txt = open(path).read().splitlines()
+    lines, _in, _shown = [], False, 0
+    for ln in txt:
+        if ln.startswith("## "):
+            _in = (league_name in ln)
+            continue
+        if _in and ("Wesley playoff probability" in ln
+                    or "<-- YOU" in ln):
+            lines.append("  " + ln.replace(" <-- YOU", ""))
+            _shown += 1
+    if not _shown:
+        lines.append("  (snapshot has no section for this league yet)")
+    return lines
 def get(url):
     req = urllib.request.Request(url, headers={"User-Agent": "trade-board/1.0"})
     return json.load(urllib.request.urlopen(req, timeout=30))
@@ -694,7 +757,7 @@ def main():
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
         gap = abs(mine["val"] - theirs["val"]) / max(
             mine["val"], theirs["val"], 1)
-        delta, sits, starts, _ = swap_delta(mine, theirs)
+        delta, sits, starts, _ = sd(mine, theirs)
         tag = " [CREATES YOUR %s HOLE]" % mine["pos"] if hole else ""
         thin = " (thins %s)" % ("you" if mflag else "them") if mflag or tflag else ""
         fit = ""
@@ -930,34 +993,13 @@ def main():
 
     my_lineup_dval = sum(x["val"] for x in disc_lineup(me["bypos"]))
 
-    def swap_delta(mine, theirs):
-        """Lineup-points delta of the swap for you: who starts, who sits.
-
-        Values are injury-discounted (E5/ADV-FF-10); a swap that would push
-        a bye week to 4+ projected starters is vetoed, 3 starters take a
-        20% penalty (completes E1/ADV-FF-15)."""
-        new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
-                         if x["id"] != mine["id"]]
-                     for p, lst in me["bypos"].items()}
-        new_bypos.setdefault(theirs["pos"], []).append(
-            dict(theirs, val=dval_for(theirs)))
-        new_lineup = lineup_ids(new_bypos)
-        new_ids = {x["id"] for x in new_lineup}
-        delta = sum(x["val"] for x in new_lineup) - my_lineup_dval
-        bye_veto = False
-        tb = fp.get(theirs["id"], (None, None, None))[0]
-        if tb:
-            others = sum(1 for x in new_lineup if x["id"] != theirs["id"]
-                         and fp.get(x["id"], (None, None, None))[0] == tb)
-            if others >= 3:
-                bye_veto = True  # would push the bye week to 4+ starters
-            elif others == 2:
-                delta -= 0.20 * dval_for(theirs)  # 3-starter cluster penalty
-        sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
-        starts = [x["name"] for x in new_lineup
-                  if x["id"] not in my_lineup_ids]
-        return delta, sits, starts, bye_veto
-
+    def sd(mine, theirs):
+        # board-bound E2 delta: closure context -> module-level swap_delta
+        # (the golden tests hit swap_delta directly with synthetic inputs)
+        return swap_delta(mine, theirs, me_bypos=me["bypos"],
+                          dval_for=dval_for, lineup_ids_fn=lineup_ids,
+                          my_lineup_dval=my_lineup_dval, my_lineup=my_lineup,
+                          my_lineup_ids=my_lineup_ids, fp=fp)
     rows = []
     dropped = 0
     bye_dropped = 0
@@ -971,7 +1013,7 @@ def main():
             for theirs, tflag in tradable(st):
                 if my_need.get(theirs["pos"], 0) <= 0:
                     continue  # you don't need it
-                delta, _, _, bye_veto = swap_delta(mine, theirs)
+                delta, _, _, bye_veto = sd(mine, theirs)
                 if bye_veto:
                     # ADV-FF-15: incoming would push a bye week to 4+
                     # projected starters — vetoed, not just tagged
