@@ -1137,6 +1137,17 @@ check("G1: radar emits named candidates with usage-vs-output evidence "
       or any("(unavailable this run" in ln for ln in _G1),
       f"radar section: {_G1[:2]}")
 
+# --- G2: manager trade profiles live-section check ---
+_G2 = _section(out_snap, "=== MANAGER TRADE PROFILES (G2")
+_profl = [ln for ln in _G2 if "trade(s)" in ln]
+check("G2: real profiles render frequency + position prefs + net value "
+      "(or the no-trades stub)",
+      (_profl and all("buys" in ln and "sells" in ln and "net value" in ln
+                      for ln in _profl))
+      or any("no completed trades yet" in ln for ln in _G2)
+      or any("(unavailable" in ln for ln in _G2),
+      f"profiles section: {_G2[:2]}")
+
 print()
 if failures:
     print(f"{len(failures)} FAILURES: {failures}")
