@@ -1125,6 +1125,18 @@ check("NF-01: WW slot line self-consistent",
       bool(_m2) and (("— SCARCE" in _m2.group(0))
                      == (int(_m2.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
 
+# --- G1: usage-gap radar live-section check ---
+_G1 = _section(out_snap, "=== USAGE-GAP RADAR (G1")
+_cand = [ln for ln in _G1
+         if any(k in ln for k in ("HOLD (", "SHOP (", "TARGET (", "WIRE ("))]
+check("G1: radar emits named candidates with usage-vs-output evidence "
+      "(or an honest stub)",
+      (_cand and all("usage-implied" in ln and "(gap " in ln
+                     for ln in _cand))
+      or any("(no major usage gaps this week)" in ln for ln in _G1)
+      or any("(unavailable this run" in ln for ln in _G1),
+      f"radar section: {_G1[:2]}")
+
 print()
 if failures:
     print(f"{len(failures)} FAILURES: {failures}")
