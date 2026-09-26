@@ -733,6 +733,81 @@ _d_p, _, _, _veto_p = tb.swap_delta(
 check("E2: 3-starter bye cluster takes the 20% penalty, not the veto",
       _veto_p is False and abs(_d_p - (650 - 520 - 0.20 * 200)) < 1e-9,
       f"delta={_d_p} veto={_veto_p}")
+# --- G4/G7: full chain — simulate -> snapshot -> board parse ---
+_ORIG_FETCH47 = fi.fetch_json
+
+
+def _fake_fetch47(url, *a, **k):
+    if url.endswith("/state/nfl"):
+        return {"week": 3}
+    if re.search(r"/league/L$", url):
+        return {"name": "T",
+                "settings": {"playoff_week_start": 15, "playoff_teams": 1}}
+    if url.endswith("/rosters"):
+        return [{"roster_id": 1, "owner_id": "me",
+                 "settings": {"wins": 2, "losses": 0, "ties": 0}},
+                {"roster_id": 2, "owner_id": "opp",
+                 "settings": {"wins": 0, "losses": 2, "ties": 0}}]
+    if url.endswith("/users"):
+        return [{"user_id": "me", "display_name": "Wesley"},
+                {"user_id": "opp", "display_name": "Rival"}]
+    m = re.search(r"/matchups/(\d+)$", url)
+    if m:
+        wk = int(m.group(1))
+        if wk == 1:
+            return [{"roster_id": 1, "points": 150.0},
+                    {"roster_id": 2, "points": 130.0}]
+        if wk == 2:
+            return [{"roster_id": 1, "points": 140.0},
+                    {"roster_id": 2, "points": 160.0}]
+        if wk >= 3:  # future: published with matchup_id set
+            return [{"roster_id": 1, "points": 0, "matchup_id": 1},
+                    {"roster_id": 2, "points": 0, "matchup_id": 1}]
+    return []
+
+
+fi.fetch_json = _fake_fetch47
+try:
+    with tempfile.TemporaryDirectory() as _td47:
+        _a47 = type("A", (), {"league": ["L"], "me": "me",
+                              "out": os.path.join(_td47, "odds.md")})()
+        fi.cmd_playoff_odds(_a47)
+        _L47 = tb.playoff_snapshot_lines("T", path=_a47.out)
+        _stale47 = os.path.join(_td47, "stale.md")
+        open(_stale47, "w").write("x\n")
+        _old = time.time() - 73 * 3600
+        os.utime(_stale47, (_old, _old))
+        try:
+            tb.playoff_snapshot_lines("T", path=_stale47)
+            _raised47 = False
+        except FileNotFoundError:
+            _raised47 = True
+        try:
+            tb.playoff_snapshot_lines("T", path="/nonexistent/odds.md")
+            _raised47m = False
+        except FileNotFoundError:
+            _raised47m = True
+        _other47 = tb.playoff_snapshot_lines("Other", path=_a47.out)
+finally:
+    fi.fetch_json = _ORIG_FETCH47
+check("G4: snapshot chain carries the playoff-probability + posture flag",
+      any("Wesley playoff probability" in ln and "CONTENDER" in ln
+          for ln in _L47),
+      f"lines={_L47}")
+check("G4: snapshot chain shows PF/G + playoff% + expected wins",
+      any("| 145.0 |" in ln and "100%" in ln for ln in _L47),
+      f"lines={_L47}")
+check("G7: schedule-luck math visible (actual | expected | luck)",
+      any("| Wesley | 2 | 1.0 | +1.0 |" in ln for ln in _L47),
+      f"lines={_L47}")
+check("G4/G7: stale (>72h) snapshot raises -> board degrades, never fakes",
+      _raised47)
+check("G4/G7: missing snapshot raises -> board degrades, never fakes",
+      _raised47m)
+check("G4/G7: league-name scoping (wrong league -> honest stub)",
+      _other47 == ["  (snapshot has no section for this league yet)"],
+      f"got {_other47}")
+
 # --- G6: UNPROTECTED flag logic (E8: free backup -> uninsured starter) ---
 _HR = fi.render_handcuff_lines([
     {"starter": "Lead Back", "team": "KC", "lead": True,
