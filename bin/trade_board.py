@@ -245,6 +245,13 @@ def low_signal_lateral(mine_disp, theirs_disp, delta, mine_val, theirs_val):
     return ""
 
 
+def g5_active(nfl_week, pweight):
+    """G5 playoff-schedule weight gate (ADV-FF-13): active from Week 5 (the
+    season-clock point where playoff weeks start mattering in deals), and
+    only when the nflverse fetch produced multipliers."""
+    return nfl_week >= 5 and bool(pweight)
+
+
 def legal_drops(bench, reserve_ids, drop_needed):
     """DROP candidates for a legal ADD/DROP pair (E14 follow-up).
 
@@ -531,7 +538,7 @@ def main():
 
     # G5: playoff-schedule value multiplier, active from Week 5 (the point
     # in the season clock where playoff weeks start mattering in deals).
-    pw_active = nfl_week >= 5 and bool(pweight)
+    pw_active = g5_active(nfl_week, pweight)
 
     def pw_of(pid):
         if not pw_active:
@@ -827,7 +834,7 @@ def main():
     print("=== YOUR ROSTER (by value) ===")
     if pw_active:
         print("  [P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal — "
-              "values below are playoff-weighted x0.9-1.1")
+              "swap deltas below use playoff-weighted values (x0.9-1.1)")
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
