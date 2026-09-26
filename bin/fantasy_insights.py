@@ -745,6 +745,16 @@ def handcuff_map(depth, my_ids, rostered_ids, players, rid2name, my_rid):
     Returns [{starter_sid, starter, team, lead (bool), backups:
     [{sid, name, status}]}] where status is 'mine' | 'free' |
     'opp:<manager>' | 'unknown'. A tie at rank 2 lists every co-backup.
+
+    E8 scope note: RB-only is deliberate, not a gap. The handcuff is a
+    contingent-value concept — a backup who inherits the starter's full
+    workload — and only RB backups have it. A WR/TE backup inherits a
+    fraction of targets redistributed across the depth chart (no 1:1
+    cuff), and for QB the actionable insurance in Superflex is a
+    rostered QB3 (covered by the waiver-wire QB line), not stashing your
+    QB's named NFL backup — a bench spot on a zero until the starter is
+    actually out. parse_depth_charts captures QB/WR/TE ranks too, but the
+    audit intentionally reads only RB.
     """
     gsis_to_sid = {}
     for sid, p in (players.items() if isinstance(players, dict) else []):
@@ -801,6 +811,30 @@ def handcuff_map(depth, my_ids, rostered_ids, players, rid2name, my_rid):
                     "rank": my_rank,
                     "note": "" if lead else f"not the lead back (rank {my_rank})"})
     return out
+
+
+def render_handcuff_lines(hm):
+    """Board lines for handcuff_map rows (section header printed by caller).
+
+    The <-- UNPROTECTED flag fires exactly when a lead back's direct
+    backup is free (status 'free'): the starter has no insurance and the
+    cuff is claimable. Backups that are mine / opp-held / unknown never
+    flag — only a free backup is actionable. A lead with no listed
+    backup prints '(no listed backup)' with no flag (unknown, not free).
+    """
+    lines = []
+    for h in hm:
+        if h["lead"]:
+            backs = ", ".join(
+                f"{b['name']} [{b['status']}]" for b in h["backups"])
+            flag = ("  <-- UNPROTECTED"
+                    if any(b["status"] == "free" for b in h["backups"])
+                    else "")
+            lines.append(f"  {h['starter']} ({h['team']} RB1): "
+                         f"backup {backs or '(no listed backup)'}{flag}")
+        else:
+            lines.append(f"  {h['starter']}: {h.get('note') or 'no data'}")
+    return lines
 
 
 def infer_backups_from_snaps(snaps_csv, team):
