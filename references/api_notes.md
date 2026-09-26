@@ -67,19 +67,24 @@ Join to Sleeper IDs on normalized (name, team, pos): ~95% of his
 skill-position roster matched on 2026-09-22 (Sleeper's own GSIS
 coverage is only ~31%, so name+team+pos is the working join).
 
-## ESPN odds (core API — verified 2026-09-22)
+## ESPN odds (core API — verified 2026-09-22, re-verified 2026-09-26)
 
 - The public scoreboard endpoint
   (`site.api.espn.com/apis/site/v2/sports/nfl/scoreboard`) returns 403
   from this network despite a browser User-Agent. Do not use it.
 - Working path:
-  `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/{eventId}/competitions/{eventId}/odds?limit=50`.
-  Game IDs come from nflverse `games.csv.gz` (ESPN event IDs). Parse the
-  `Draft Kings` provider entry (`provider.name == "Draft Kings"`).
+  `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/{eventId}/competitions/{eventId}/odds`
+  (no `?limit` needed). Game IDs come from nflverse `games.csv.gz` (ESPN
+  event IDs). Parse the DraftKings provider entry (`provider.name ==
+  "DraftKings"`; the code matches `"draft"` case-insensitively and falls
+  back to any item carrying a `spread`). Re-verified 2026-09-26 on NFL
+  Week 3: 16/16 games priced, zero errors.
 - GAME-LEVEL ONLY: spread, total, moneylines. No player props exist in
   free data. G10 turns these into start/sit script + shootout signals
-  (line >= 6.5 → positive script for the favorite's pieces; total >=
-  47.5 → shootout watch; underdog + line >= 6.5 → negative script).
+  (line >= 7.0 → positive script for the favorite's pieces; total >=
+  48.0 → shootout watch; total <= 41.5 → grind fade; underdog catching
+  >= 7.0 → negative script; total moved >= 2.0 from open → market-moved
+  note).
 - Degraded path: keep the last good `hidden_files/game-odds.md`, exit
   nonzero, print "No pricing data available today".
 
