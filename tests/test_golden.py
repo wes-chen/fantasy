@@ -662,6 +662,42 @@ _HM3 = fi.handcuff_map(_DEP, ["s3"], {"9": ["s1", "s3"]}, _PL6,
 check("G6: my RB who is not the lead is flagged",
       _HM3[0]["lead"] is False)
 
+# --- G6: UNPROTECTED flag logic (E8: free backup -> uninsured starter) ---
+_HR = fi.render_handcuff_lines([
+    {"starter": "Lead Back", "team": "KC", "lead": True,
+     "backups": [{"sid": "s2", "name": "Backup Back", "status": "free"}]},
+    {"starter": "Covered Back", "team": "SF", "lead": True,
+     "backups": [{"sid": "s3", "name": "Held Back", "status": "opp:Opp"}]},
+    {"starter": "My Cuff Back", "team": "DET", "lead": True,
+     "backups": [{"sid": "s4", "name": "Own Back", "status": "mine"}]},
+    {"starter": "Mystery Back", "team": "BUF", "lead": True,
+     "backups": [{"sid": None, "name": "Ghost", "status": "unknown"}]},
+    {"starter": "Lone Back", "team": "NE", "lead": True, "backups": []},
+    {"starter": "Committee Back", "team": "BAL", "lead": False,
+     "note": "not the lead back (rank 3)"},
+])
+check("G6: free backup -> UNPROTECTED flag (uninsured starter)",
+      any("Lead Back" in ln and "<-- UNPROTECTED" in ln for ln in _HR),
+      f"got {_HR}")
+check("G6: opp-held / mine / unknown backups never flag",
+      not any("<-- UNPROTECTED" in ln for ln in _HR
+              if "Covered Back" in ln or "My Cuff Back" in ln
+              or "Mystery Back" in ln),
+      f"got {_HR}")
+check("G6: no listed backup prints the stub, no flag",
+      any("Lone Back" in ln and "(no listed backup)" in ln
+          and "<-- UNPROTECTED" not in ln for ln in _HR),
+      f"got {_HR}")
+check("G6: non-lead prints the note line",
+      any("Committee Back: not the lead back (rank 3)" in ln
+          for ln in _HR),
+      f"got {_HR}")
+check("G6: co-backup tie with one free still flags",
+      any("<-- UNPROTECTED" in ln for ln in fi.render_handcuff_lines([
+          {"starter": "Tie Back", "team": "KC", "lead": True,
+           "backups": [{"sid": "a", "name": "A", "status": "opp:Opp"},
+                       {"sid": "b", "name": "B", "status": "free"}]}])))
+
 # --- G7: schedule luck ---
 _LUCK = fi.schedule_luck(
     {1: [("a", 120), ("b", 100), ("c", 90), ("d", 110)],
@@ -859,6 +895,27 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           "value ranges: (point, lo-hi) from 30-day trend volatility" in out)
 
 
+    # E8: the UNPROTECTED flag must fire exactly when a backup is free —
+    # assert the live section's internal consistency (free <-> flagged).
+    # (The snap-share fallback path prints no backup lines, so the rule
+    # is vacuously satisfied there.)
+    _hsec = out.split("=== HANDCUFF LEVERAGE MAP (G6")[1].split("===")[0]
+    _hlines = [ln for ln in _hsec.splitlines()
+               if ln.startswith("  ") and "backup" in ln]
+    check(f"{tag}: every [free] backup line carries UNPROTECTED (E8)",
+          all("<-- UNPROTECTED" in ln for ln in _hlines
+              if "[free]" in ln),
+          f"lines={_hlines}")
+    check(f"{tag}: UNPROTECTED never fires without a free backup (E8)",
+          all("[free]" in ln for ln in _hlines
+              if "<-- UNPROTECTED" in ln),
+          f"lines={_hlines}")
+
+out = run_board(SNAPUSA).stdout
+# ADV-FF-07: expectations derive from the live registry — the Pittman/Andrews
+# and Shakir/Andrews offers were rejected 2026-09-22, so the registry is
+# currently empty; if Wesley opens a new offer, the board must block it.
+_onblock = tb.load_pending_offers(os.path.join(SKILL, "pending_offers.md"))
 out = run_board(SNAPUSA).stdout
 # ADV-FF-07: expectations derive from the live registry — the Pittman/Andrews
 # and Shakir/Andrews offers were rejected 2026-09-22, so the registry is
