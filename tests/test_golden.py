@@ -161,6 +161,24 @@ check("ir_move_valid: open slot -> ok",
 check("ir_move_valid: int pid matches str reserve entry",
       tb.ir_move_valid(8205, ["8205"], 1)[0] is False)
 
+# ---------------- E14 follow-up: FULL roster drops must be active -------
+_bench = [{"id": "8205", "name": "Isiah Pacheco", "pos": "RB", "val": 0},
+          {"id": "9221", "name": "Jahmyr Gibbs", "pos": "RB", "val": 8500},
+          {"id": "6819", "name": "Michael Pittman", "pos": "WR", "val": 402}]
+check("legal_drops: FULL roster excludes reserve occupants",
+      [b["name"] for b in tb.legal_drops(_bench, ["8205"],
+                                         drop_needed=True)]
+      == ["Jahmyr Gibbs", "Michael Pittman"])
+check("legal_drops: FULL roster with int reserve ids also excluded",
+      tb.legal_drops(_bench, [8205], drop_needed=True)[0]["name"]
+      != "Isiah Pacheco")
+check("legal_drops: open bench allows reserve occupants as drops",
+      len(tb.legal_drops(_bench, ["8205"], drop_needed=False)) == 3)
+check("legal_drops: FULL roster, nothing in reserve -> unchanged",
+      tb.legal_drops(_bench, [], drop_needed=True) == _bench)
+check("legal_drops: FULL roster, all bench in reserve -> no legal drop",
+      tb.legal_drops([_bench[0]], ["8205"], drop_needed=True) == [])
+
 # ---------------- NF-01: waiver priority cost model ----------------
 _fake_rosters = [
     {"owner_id": "aaa", "roster_id": 1,
@@ -709,6 +727,19 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           not any("[CLAIM" in ln for ln in _moves)
           or all("clears Tue 12:00am PT" in ln and "burns #" in ln
                  for ln in _moves if "[CLAIM" in ln))
+    # E14 follow-up: on a FULL roster the DROP in every suggested move must
+    # be an active player — dropping an IR/reserve occupant frees no active
+    # bench slot, so the ADD would have nowhere to go.
+    _full = re.search(r"  slot check: active \d+/\d+ — FULL: every ADD needs a DROP"
+                      r" \| IR: ([^\(]+) \(\d+/\d+ used", out)
+    _res = set()
+    if _full and _full.group(1).strip() != "—":
+        _res = {n.strip() for n in _full.group(1).split(",")}
+    _bad_drops = [ln for ln in _moves
+                  if _res and re.search(r" / DROP ([^(]+) \(",
+                                        ln).group(1).strip() in _res]
+    check(f"{tag}: no suggested DROP is an IR/reserve occupant on a FULL roster (E14)",
+          not _bad_drops, f"illegal drops: {_bad_drops}")
     # E6: fairness bands — legend in the swaps header, a band on every
     # swap gap tag, and the league's largest accepted gap as the live
     # calibration in the trade history section.
