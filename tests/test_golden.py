@@ -724,6 +724,31 @@ _HM3 = fi.handcuff_map(_DEP, ["s3"], {"9": ["s1", "s3"]}, _PL6,
                        {"9": "Me"}, "9")
 check("G6: my RB who is not the lead is flagged",
       _HM3[0]["lead"] is False)
+# "mine": the backup is on my own roster -> protected, no UNPROTECTED flag
+_HM4 = fi.handcuff_map(_DEP, ["s1", "s2"], {"9": ["s1", "s2"]}, _PL6,
+                       {"9": "Me"}, "9")
+check("G6: backup I own labeled mine",
+      _HM4[0]["backups"][0]["status"] == "mine",
+      f"got {_HM4[0]['backups']}")
+# "unknown": the depth chart names a backup that matches no Sleeper
+# player (no gsis_id, no name match) -> unknown, never faked as free
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("dt,team,player_name,gsis_id,pos_abb,pos_rank\n"
+              "2026-09-21T00:00:00Z,DAL,Lead Back,gsisA,RB,1\n"
+              "2026-09-21T00:00:00Z,DAL,Ghost Back,gsisX,RB,2\n")
+    _DCX = _fh.name
+_DEPX = fi.parse_depth_charts(_DCX)
+os.unlink(_DCX)
+_PL6X = {"a1": {"full_name": "Lead Back", "position": "RB",
+                "team": "DAL", "gsis_id": "gsisA"}}
+_HMX = fi.handcuff_map(_DEPX, ["a1"], {"9": ["a1"]}, _PL6X,
+                       {"9": "Me"}, "9")
+check("G6: unmatchable backup -> unknown, never faked",
+      _HMX[0]["backups"][0]["status"] == "unknown"
+      and _HMX[0]["backups"][0]["sid"] is None,
+      f"got {_HMX[0]['backups']}")
+
 
 # ---------------- E2/G1/G2/G4/G7/G9: verify-or-implement rounds -----
 print("== E2/G1/G2/G4/G7/G9 verification ==")
@@ -1072,6 +1097,21 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: G5 roster legend gated with the weights",
           ("[P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal" in out)
           == _g5expect)
+    # G6: the section always prints a body (backup lines or a marked stub),
+    # and a free backup is never printed without the UNPROTECTED flag.
+    _g6sec = out.split(
+        "=== HANDCUFF LEVERAGE MAP (G6: each of your RBs' direct backup) ==="
+    )[1].split("===")[0]
+    check(f"{tag}: G6 section prints a body, never an empty section",
+          any(k in _g6sec for k in
+              ("backup", "lead back", "no RBs on your roster",
+               "unavailable", "INFERRED", "no depth-chart data",
+               "no data")),
+          f"section: {_g6sec[:120]}")
+    _freelines = [ln for ln in _g6sec.splitlines() if "[free]" in ln]
+    check(f"{tag}: G6 free backup always carries the UNPROTECTED flag",
+          all("UNPROTECTED" in ln for ln in _freelines),
+          f"unflagged: {[ln for ln in _freelines if 'UNPROTECTED' not in ln]}")
     check(f"{tag}: G3 trending velocity line",
           "trending velocity (Sleeper-wide adds" in out)
     _tline = next((ln for ln in out.splitlines()
