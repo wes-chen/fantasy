@@ -108,6 +108,24 @@ check("E6: band 35% -> STRETCH (boundary)",
       tb.fairness_band(0.35) == "STRETCH")
 check("E6: band 36% -> UNFAIR", tb.fairness_band(0.36) == "UNFAIR")
 
+# ---------------- E7: value ranges + low-signal flag ----------------
+check("E7: range half-width = 50% of |trend30d|",
+      tb.value_range(4000, 800) == (3600, 4400))
+check("E7: range symmetric for negative trends",
+      tb.value_range(4000, -800) == (3600, 4400))
+check("E7: zero trend -> point range",
+      tb.value_range(4000, 0) == (4000, 4000))
+check("E7: lo clamped at 0", tb.value_range(100, -600) == (0, 400))
+check("E7: flat trends + small delta -> LOW-SIGNAL LATERAL flag",
+      "LOW-SIGNAL LATERAL" in
+      tb.low_signal_lateral(False, False, 50, 4000, 4000))
+check("E7: a moving side clears the flag",
+      tb.low_signal_lateral(True, False, 50, 4000, 4000) == ""
+      and tb.low_signal_lateral(False, True, 50, 4000, 4000) == "")
+check("E7: big delta clears the flag",
+      tb.low_signal_lateral(False, False, 900, 4000, 4000) == "")
+
+
 with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
     fh.write("# comment\n\n")
     fh.write("6819 | Michael Pittman | ydai | 2026-09-20 | pending | x\n")
@@ -828,6 +846,18 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: league calibration line or no-trades (E6)",
           ("league calibration: largest accepted gap this season" in out)
           or ("no completed trades yet" in out))
+    # E7: every swap row prints a value range next to the point value
+    # (vacuous when a league legitimately has no fits this run).
+    _swaps = [ln for ln in out.splitlines()
+              if ln.startswith("  you send ")]
+    _ranged = [ln for ln in _swaps
+               if re.search(r"\(\d+, \d+-\d+\)", ln)]
+    check(f"{tag}: swap rows show value ranges (E7)",
+          not _swaps or len(_ranged) == len(_swaps),
+          f"rangeless rows: {[ln for ln in _swaps if ln not in _ranged]}")
+    check(f"{tag}: value-range legend under swaps header (E7)",
+          "value ranges: (point, lo-hi) from 30-day trend volatility" in out)
+
 
 out = run_board(SNAPUSA).stdout
 # ADV-FF-07: expectations derive from the live registry — the Pittman/Andrews
