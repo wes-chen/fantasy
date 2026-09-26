@@ -795,22 +795,8 @@ def main():
     print()
     print("=== PLAYOFF ODDS + SCHEDULE LUCK (G4/G7: weekly snapshot) ===")
     try:
-        _pop = os.path.join(fi.GOAL_DIR, "hidden_files", "playoff-odds.md")
-        _age = (time.time() - os.stat(_pop).st_mtime) / 3600
-        if _age > 72:
-            raise FileNotFoundError("stale snapshot")
-        _txt = open(_pop).read().splitlines()
-        _in, _shown = False, 0
-        for _ln in _txt:
-            if _ln.startswith("## "):
-                _in = (league.get("name", "") in _ln)
-                continue
-            if _in and ("Wesley playoff probability" in _ln
-                        or "<-- YOU" in _ln):
-                print("  " + _ln.replace(" <-- YOU", ""))
-                _shown += 1
-        if not _shown:
-            print("  (snapshot has no section for this league yet)")
+        for _ln in playoff_snapshot_lines(league.get("name", "")):
+            print(_ln)
     except Exception:  # noqa: BLE001 - degraded, never fatal
         print("  (snapshot missing/stale — run: python3 "
               "bin/fantasy_insights.py playoff-odds --league <id> "
