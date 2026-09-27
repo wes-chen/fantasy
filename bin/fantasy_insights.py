@@ -899,7 +899,12 @@ def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
     sids with open offers (never named as drops).
     contingent = val * (1 + 0.9*handcuff + 1.1*ahead_out + 0.25*rising).
     Returns (ranked, drops): ranked asc by contingent value; drops = the
-    bottom names that are safe to name (not on-block, not IR-stashed).
+    bottom names that are safe to name (priced, not on-block, not IR-stashed).
+    Unpriced players (no value feed — e.g. K/DEF at val 0) stay in the
+    ranking for completeness but are NEVER named as drops: unpriced is not
+    droppable. The call site feeds K/DEF as bench because the lineup model
+    has no K/DEF slots, so without this guard the only K and DEF on the
+    roster always bottom the ranking and get named as drop candidates.
     """
     handcuff_of = handcuff_of or {}
     ahead_out = ahead_out or {}
@@ -915,13 +920,13 @@ def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
                            blocked=sid in onblock))
     ranked.sort(key=lambda d: d["contingent"])
     # Drops: lowest contingent value AND no contingency boost (no handcuff
-    # role, no hurt starter ahead, no rising usage), never on-block/IR.
+    # role, no hurt starter ahead, no rising usage), never on-block/IR,
+    # and priced — val > 0 means a value feed exists to judge the cost.
     drops = [d["name"] for d in ranked
              if not d["blocked"] and (d.get("inj") or "") != "IR"
+             and (d.get("val", 0) or 0) > 0
              and d["contingent"] <= d.get("val", 0)][:3]
     return ranked, drops
-
-
 # ---------------------------------------------------------------- G9 bye-crater forecast
 
 def bye_craters(byes, my_ids, lineup_ids, nfl_week, horizon=4):
