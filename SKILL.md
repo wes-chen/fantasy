@@ -60,7 +60,8 @@ droppable bench with every ADD tagged [FA NOW] (instant add, no
 priority cost) or [CLAIM — clears Tue 12:00am PT, burns #N] from recent
 drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
-hurt-starter backups, and rising-usage players are protected, never
+hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
+no value feed — unpriced is not droppable) are protected, never
 named as drops)).
 The header also prints the season clock: current NFL week, weeks to the
 trade deadline, and the posture below.
