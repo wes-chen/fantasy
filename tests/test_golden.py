@@ -995,6 +995,19 @@ check("G8: every contingency outranks the plain clogger",
       == {"Cuff", "HurtAhead", "Rising"})
 check("G8: drops name only the unprotected clogger",
       _D8B == ["Clogger"])
+# #25 regression: unpriced positional starters (K/DEF carry val 0 because
+# there is no FantasyCalc feed for them) always bottom the contingent
+# ranking; they must stay in the ranking for completeness but NEVER be
+# named as drops — unpriced is not droppable.
+_R8C, _D8C = fi.clog_audit(
+    [{"sid": "k1", "name": "OnlyK", "pos": "K", "val": 0, "inj": ""},
+     {"sid": "d1", "name": "OnlyD", "pos": "DEF", "val": 0, "inj": ""},
+     {"sid": "1", "name": "Clogger", "pos": "WR", "val": 1000, "inj": ""}])
+check("G8: unpriced K/DEF sort to the bottom of the ranking",
+      [_R8C[0]["name"], _R8C[1]["name"]] == ["OnlyK", "OnlyD"]
+      and _R8C[2]["name"] == "Clogger")
+check("G8: unpriced players are never named as drop candidates",
+      _D8C == ["Clogger"])
 
 
 # --- G9: bye craters ---
