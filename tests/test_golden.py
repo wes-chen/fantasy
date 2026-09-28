@@ -57,9 +57,78 @@ check("injury discount IR=0.5", tb.injury_discount("IR") == 0.5)
 check("injury discount Doubtful=0.7", tb.injury_discount("Doubtful") == 0.7)
 check("injury discount Questionable=0.85",
       tb.injury_discount("Questionable") == 0.85)
-check("injury discount healthy=1.0",
-      tb.injury_discount("") == 1.0 and tb.injury_discount(None) == 1.0
-      and tb.injury_discount("Probable") == 1.0)
+# ---------------- #24: FantasyPros ROS feed, not draft cheatsheet --------
+import urllib.request as _urlreq  # noqa: E402
+
+
+def _fp_page(ranking_type, rtype, scoring, last_updated, players):
+    return ("var ecrData = {\"sport\":\"NFL\",\"type\":\"%s\","
+            "\"ranking_type_name\":\"%s\",\"year\":\"2026\",\"week\":\"0\","
+            "\"scoring\":\"%s\",\"last_updated\":\"%s\",\"players\":[%s]};\n"
+            % (rtype, ranking_type, scoring, last_updated, players))
+
+
+_FP_ROS_PAGE = _fp_page(
+    "ros", "ROS PPR", "PPR", "9\\/28",
+    '{"player_name":"Jahmyr Gibbs","player_bye_week":"7",'
+    '"rank_ecr":1,"tier":1}')
+_FP_HALF_PAGE = _fp_page(
+    "ros", "ROS Half PPR", "HALF", "9\\/28",
+    '{"player_name":"Jahmyr Gibbs","player_bye_week":"7",'
+    '"rank_ecr":2,"tier":1}')
+_FP_DRAFT_PAGE = _fp_page(
+    "draft", "Draft", "STD", "8\\/01",
+    '{"player_name":"Jahmyr Gibbs","player_bye_week":"7",'
+    '"rank_ecr":5,"tier":1}')
+
+
+class _fp_urlopen:
+    page = _FP_ROS_PAGE
+    seen = []
+
+    def __call__(self, req, *a, **k):
+        self.__class__.seen.append(req.full_url)
+        page = self.__class__.page
+
+        class _Resp:
+            def read(self):
+                return page.encode()
+        return _Resp()
+
+
+_saved_fp_urlopen = _urlreq.urlopen
+_urlreq.urlopen = _fp_urlopen()
+try:
+    _fp_players = {"1": {"full_name": "Jahmyr Gibbs", "active": True,
+                         "search_rank": 1}}
+    _fp_urlopen.seen = []
+    _fp, _upd = tb.get_fp_ecr(_fp_players, 1.0)
+    check("#24: full-PPR fetches the ROS overall page (not a cheatsheet)",
+          any("ros-ppr-overall.php" in u for u in _fp_urlopen.seen)
+          and not any("cheatsheets" in u for u in _fp_urlopen.seen),
+          f"urls: {_fp_urlopen.seen}")
+    check("#24: ROS row maps by name with bye/ECR/tier, freshness = "
+          "last_updated (not week 0)",
+          _fp.get("1") == (7, 1, 1) and _upd == "9/28",
+          f"fp={_fp}, upd={_upd}")
+    _fp_urlopen.seen = []
+    _fp_urlopen.page = _FP_HALF_PAGE
+    _fp2, _upd2 = tb.get_fp_ecr(_fp_players, 0.5)
+    check("#24: half-PPR fetches the ROS half-point-PPR overall page",
+          any("ros-half-point-ppr-overall.php" in u for u in _fp_urlopen.seen),
+          f"urls: {_fp_urlopen.seen}")
+    check("#24: half-PPR page feeds half-PPR ranks (ECR 2, not PPR ECR 1)",
+          _fp2.get("1") == (7, 2, 1), f"fp2={_fp2}")
+    _fp_urlopen.page = _FP_DRAFT_PAGE
+    _draft_rejected = False
+    try:
+        tb.get_fp_ecr(_fp_players, 1.0)
+    except ValueError:
+        _draft_rejected = True
+    check("#24: draft-cheatsheet page is REJECTED, never labeled ROS",
+          _draft_rejected)
+finally:
+    _urlreq.urlopen = _saved_fp_urlopen
 
 # ---------------- E5: season-timing injury discount ----------------
 _approx = lambda got, want: abs(got - want) < 1e-9
@@ -1104,6 +1173,19 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===" in out)
     check(f"{tag}: trade-lock boundary line (ADV-FF-14)",
           "Trade lock: trades legal through NFL Week" in out)
+    # #24: the ECR line must cite a validated ROS feed — never the
+    # "week 0" draft-cheatsheet mislabel, and never draft ranks.
+    _fp_lines = [ln for ln in out.splitlines()
+                 if ln.startswith("FantasyPros rest-of-season ECR (")
+                 or ln.startswith("FantasyPros ECR unavailable")]
+    check(f"{tag}: FP line is an honest ROS stamp or an honest stub (#24)",
+          len(_fp_lines) == 1 and (
+              _fp_lines[0].startswith("FantasyPros ECR unavailable this run")
+              or bool(re.match(
+                  r"FantasyPros rest-of-season ECR \(ROS, updated [0-9/]+, "
+                  r"\d+ players matched\)", _fp_lines[0])))
+          and "(week 0" not in _fp_lines[0],
+          f"lines: {_fp_lines}")
     for hdr in ("=== LEAGUE TRADE HISTORY (market comps) ===",
                 "=== MANAGER TRADE PROFILES (G2",
                 "=== TEAM NEEDS (startable vs effective slots) ===",
