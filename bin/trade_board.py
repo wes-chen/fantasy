@@ -395,13 +395,23 @@ def norm_name(n):
 def get_fp_ecr(players, ppr):
     """FantasyPros rest-of-season ECR + bye weeks.
 
-    Scraped from the rankings page (embeds `var ecrData`; no auth).
-    Returns (fp, fp_week): fp maps sleeper_id -> (bye_week, ecr_rank, tier).
+    Scraped from FantasyPros' actual rest-of-season ranking pages
+    (embeds `var ecrData`; no auth). The old cheatsheet URLs
+    (`{ppr|half}-ppr-cheatsheets.php`) 302 into the PRESEASON draft
+    cheatsheet, which looks identical structurally but carries
+    `ranking_type_name: "draft"` — labeling it "rest-of-season" made
+    every buy-low/sell-high verdict stale by construction (#24).
+    A page whose `ranking_type_name` is not "ros" is REJECTED here so
+    August draft ranks can never flow into the divergence section;
+    the caller degrades honestly to "unavailable this run".
+    Returns (fp, fp_updated): fp maps sleeper_id -> (bye_week, ecr_rank,
+    tier); fp_updated is the feed's `last_updated` stamp (the ROS pages
+    leave `week` unset at 0, so last_updated is the freshness signal).
     Raises on fetch/parse failure; caller falls back to empty.
     """
-    scoring = "ppr" if ppr >= 1.0 else "half"
     url = (f"https://www.fantasypros.com/nfl/rankings/"
-           f"{scoring}-ppr-cheatsheets.php")
+           + ("ros-ppr-overall.php" if ppr >= 1.0
+              else "ros-half-point-ppr-overall.php"))
     req = urllib.request.Request(url, headers={
         "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -410,6 +420,11 @@ def get_fp_ecr(players, ppr):
         "utf-8", "replace")
     m = re.search(r"var ecrData = (\{.*?\});\s*\n", html, re.S)
     d = json.loads(m.group(1))
+    if d.get("ranking_type_name") != "ros":
+        raise ValueError(
+            f"FantasyPros served a non-ROS page at {url} "
+            f"(ranking_type_name={d.get('ranking_type_name')!r}, "
+            f"type={d.get('type')!r}) — refusing to label it ROS ECR")
     name2sid = {}
     def _key(p):
         # prefer active, fantasy-relevant players on name collisions
@@ -430,7 +445,7 @@ def get_fp_ecr(players, ppr):
         except (TypeError, ValueError):
             bye = None
         fp[sid] = (bye, pl.get("rank_ecr"), pl.get("tier"))
-    return fp, d.get("week")
+    return fp, d.get("last_updated")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -496,9 +511,9 @@ def main():
 
     # --- FantasyPros rest-of-season ECR + bye weeks (independent cross-check) ---
     try:
-        fp, fp_week = get_fp_ecr(players, ppr)
+        fp, fp_updated = get_fp_ecr(players, ppr)
     except Exception:
-        fp, fp_week = {}, None
+        fp, fp_updated = {}, None
 
     # --- nflverse bulk data: powers G1 (usage gaps), G5 (playoff SOS
     # weighting) and G6 (handcuff map). Cached 24h; every consumer below
@@ -640,7 +655,7 @@ def main():
         print(f"DEADLINE WEEK: deals must be ACCEPTED {trade_review_days}+ "
               f"day(s) before the Week {trade_dl + 1} lock to clear review")
     if fp:
-        print(f"FantasyPros rest-of-season ECR (week {fp_week}, "
+        print(f"FantasyPros rest-of-season ECR (ROS, updated {fp_updated or '?'}, "
               f"{len(fp)} players matched)")
     else:
         print("FantasyPros ECR unavailable this run (bye/divergence skipped)")
