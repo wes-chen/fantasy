@@ -115,17 +115,27 @@ exactly what the persona's judgment layers add on top.
 
 ## FantasyPros rest-of-season ECR + bye weeks (scraped, no auth)
 
-`GET https://www.fantasypros.com/nfl/rankings/{ppr|half}-ppr-cheatsheets.php`
-(use `ppr` for full-PPR leagues, `half` for half-PPR). The page embeds
+`GET https://www.fantasypros.com/nfl/rankings/ros-ppr-overall.php`
+(full-PPR leagues) or
+`GET https://www.fantasypros.com/nfl/rankings/ros-half-point-ppr-overall.php`
+(half-PPR). The page embeds
 `var ecrData = {...}` JSON: `players[]` with `player_name`,
 `player_bye_week`, `rank_ecr`, `pos_rank`, `tier`, `player_owned_avg`.
 
-Notes (verified 2026-09-21):
+Notes (verified 2026-09-28):
 - No API key needed, but the anonymous `partners.api.fantasypros.com`
   endpoint is unreachable from this network — page scrape is the working
   path. Send a browser User-Agent.
-- `ecrData.week` is 0 on the cheatsheet (rest-of-season, not weekly) —
-  that is the right signal for trades; label it honestly.
+- Do NOT use the `{ppr|half}-ppr-cheatsheets.php` URLs (gh #24): they
+  302 into the PRESEASON draft cheatsheet (`ranking_type_name: "draft"`,
+  title "2026 Fantasy Football Draft Rankings") — comparing live
+  FantasyCalc values to August draft ranks makes every buy-low/sell-high
+  verdict stale by construction. The true ROS pages carry
+  `ranking_type_name: "ros"` and `type` "ROS PPR"/"ROS Half PPR".
+- `ecrData.week` is 0 on the ROS pages too (FantasyPros leaves it unset),
+  so `week` is NOT a staleness signal — `last_updated` (e.g. "9/28") is.
+  The engine rejects any non-`ros` page and degrades to "unavailable
+  this run" rather than printing draft ranks as ROS ECR.
 - Join to Sleeper IDs on normalized names (lowercase, strip periods /
   apostrophes / suffixes Jr/Sr/II/III/IV/V). On collisions prefer
   `active` players with the lowest `search_rank` (e.g. "Kenneth Walker"
