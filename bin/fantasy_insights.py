@@ -541,6 +541,11 @@ def fetch_remaining_schedule(league_id, nfl_week, last_week=18):
     Sleeper publishes future matchups with matchup_id set, so the
     remaining schedule is known. Past weeks' points come from the
     matchups endpoints (completed weeks only).
+
+    last_week MUST be the last regular-season week (playoff_week_start
+    - 1): Sleeper publishes matchups for playoff weeks too, and any
+    playoff week ingested here is simulated as a regular-season game
+    by callers (#23). Callers: always pass last_week=pstart - 1.
     """
     sched, pf, played = {}, {}, {}
     for wk in range(nfl_week, last_week + 1):
@@ -1138,7 +1143,17 @@ def cmd_playoff_odds(a):
         # fetch_remaining_schedule already returns points FOR PER GAME —
         # assigning directly. (Dividing again by weeks-played was a real
         # bug: it shrank every team's PF/G and corrupted the sim odds.)
-        sched, pfpg = fetch_remaining_schedule(lid, nfl_week)
+        # Only regular-season weeks enter the sim: Sleeper publishes
+        # playoff-week matchups, and simulating them as regular-season
+        # games distorted every bubble team's probability (#23).
+        sched, pfpg = fetch_remaining_schedule(lid, nfl_week,
+                                               last_week=pstart - 1)
+        max_reg_games = max(0, pstart - nfl_week)  # one game/team/week
+        per_team = max((len(v) for v in sched.values()), default=0)
+        assert per_team <= max_reg_games, (
+            f"G4: {per_team} remaining games for a team exceeds the "
+            f"{max_reg_games} regular-season weeks left (playoff-week "
+            "matchups leaked into the simulation)")
         probs = simulate_playoffs(records, sched, pteams, pfpg=pfpg)
         my_rid = next((str(r["roster_id"]) for r in rosters
                        if r.get("owner_id") == a.me), None)
