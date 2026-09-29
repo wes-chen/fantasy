@@ -603,6 +603,117 @@ check("G4: playoff CLI prints the true PF/G in the table",
       "| 100.0 |" in _OUT4,
       f"table line: {[l for l in _OUT4.splitlines() if 'Wesley' in l][:2]}")
 
+# --- G4/#23: playoff weeks must never enter the simulation ---
+# Regression: cmd_playoff_odds used to call fetch_remaining_schedule with
+# the default last_week=18, so weeks 15-18 (playoffs) were simulated as
+# regular-season games, distorting bubble-team probabilities and the
+# posture line that drives trade decisions.
+_MW23 = {wk: [{"roster_id": 1, "matchup_id": 1},
+              {"roster_id": 2, "matchup_id": 1}]
+         for wk in range(3, 19)}
+_WEEKS23 = []
+_ORIG_FETCH23 = fi.fetch_json
+
+
+def _fake_fetch23(url, *a, **k):
+    m = re.search(r"/matchups/(\d+)$", url)
+    if m:
+        _WEEKS23.append(int(m.group(1)))
+        return _MW23.get(int(m.group(1)), [])
+    return _ORIG_FETCH23(url, *a, **k)
+
+
+fi.fetch_json = _fake_fetch23
+try:
+    _WEEKS23.clear()
+    _S23, _P23 = fi.fetch_remaining_schedule("L", 3, last_week=14)
+    _FUT23 = sorted(w for w in set(_WEEKS23) if w >= 3)
+finally:
+    fi.fetch_json = _ORIG_FETCH23
+check("G4/#23: fetch_remaining_schedule never requests a playoff week",
+      _FUT23 == list(range(3, 15)), f"future weeks fetched={_FUT23}")
+check("G4/#23: schedule holds only regular-season pairings",
+      max((len(v) for v in _S23.values()), default=0) <= 12
+      and sorted(_S23.get("1", [])) == ["2"] * 12,
+      f"sched={_S23}")
+
+# CLI-level: cmd_playoff_odds must pass last_week = playoff_week_start - 1.
+_CAP23 = {}
+_ORIG_FRS23 = fi.fetch_remaining_schedule
+_ORIG_SIM23 = fi.simulate_playoffs
+_ORIG_FETCH23B = fi.fetch_json
+
+
+def _fake_fetch23b(url, *a, **k):
+    if url.endswith("/state/nfl"):
+        return {"week": 3}
+    if re.search(r"/league/L$", url):
+        return {"name": "T",
+                "settings": {"playoff_week_start": 15, "playoff_teams": 2}}
+    if url.endswith("/rosters"):
+        return [{"roster_id": 1, "owner_id": "me",
+                 "settings": {"wins": 2, "losses": 0, "ties": 0}},
+                {"roster_id": 2, "owner_id": "x",
+                 "settings": {"wins": 0, "losses": 2, "ties": 0}}]
+    if url.endswith("/users"):
+        return [{"user_id": "me", "display_name": "Wesley"},
+                {"user_id": "x", "display_name": "X"}]
+    if "/matchups/" in url:
+        return []
+    return _ORIG_FETCH23B(url, *a, **k)
+
+
+def _fake_frs23(lid, wk, last_week=18):
+    _CAP23["last_week"] = last_week
+    return {}, {}
+
+
+def _fake_sim23(records, sched, pteams, pfpg=None, sims=20000, seed=42):
+    return {"1": (0.5, 2.0), "2": (0.5, 2.0)}
+
+
+fi.fetch_json = _fake_fetch23b
+fi.fetch_remaining_schedule = _fake_frs23
+fi.simulate_playoffs = _fake_sim23
+try:
+    with tempfile.TemporaryDirectory() as _td23:
+        _a23 = type("A", (), {"league": ["L"], "me": "me",
+                              "out": os.path.join(_td23, "odds.md")})()
+        fi.cmd_playoff_odds(_a23)
+finally:
+    fi.fetch_json = _ORIG_FETCH23B
+    fi.fetch_remaining_schedule = _ORIG_FRS23
+    fi.simulate_playoffs = _ORIG_SIM23
+check("G4/#23: playoff CLI bounds the sim at the last regular-season week",
+      _CAP23.get("last_week") == 14, f"last_week={_CAP23.get('last_week')}")
+
+# Guard-level: a schedule with more games per team than regular-season
+# weeks left (playoff weeks leaked in) fails loudly instead of printing
+# corrupted probabilities.
+def _fake_frs23_leak(lid, wk, last_week=18):
+    return {"1": ["2"] * 16, "2": ["1"] * 16}, {}
+
+
+fi.fetch_json = _fake_fetch23b
+fi.fetch_remaining_schedule = _fake_frs23_leak
+fi.simulate_playoffs = _fake_sim23
+_LEAK23 = None
+try:
+    with tempfile.TemporaryDirectory() as _td23:
+        _a23 = type("A", (), {"league": ["L"], "me": "me",
+                              "out": os.path.join(_td23, "odds.md")})()
+        try:
+            fi.cmd_playoff_odds(_a23)
+        except AssertionError as e:
+            _LEAK23 = str(e)
+finally:
+    fi.fetch_json = _ORIG_FETCH23B
+    fi.fetch_remaining_schedule = _ORIG_FRS23
+    fi.simulate_playoffs = _ORIG_SIM23
+check("G4/#23: leaked playoff-week games fail the sim loudly",
+      _LEAK23 is not None and "playoff-week" in _LEAK23,
+      f"got {_LEAK23}")
+
 # --- G5: playoff-schedule weighting ---
 with tempfile.NamedTemporaryFile("w", suffix=".csv",
                                  delete=False) as _fh:
