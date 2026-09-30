@@ -1001,6 +1001,37 @@ _d_p, _, _, _veto_p = tb.swap_delta(
 check("E2: 3-starter bye cluster takes the 20% penalty, not the veto",
       _veto_p is False and abs(_d_p - (650 - 520 - 0.20 * 200)) < 1e-9,
       f"delta={_d_p} veto={_veto_p}")
+# --- #21: sits/starts must be computed vs the DISCOUNTED lineup ---
+# q1 is an Out starter: raw 100, discounted 50, falls out of the top-6.
+# delta baseline (480) never includes him, so the text must not either —
+# one basis for the number and its explanation.
+_O21P = {
+    "QB": [{"id": "q1", "name": "Out QB", "pos": "QB", "val": 100}],
+    "RB": [{"id": "r1", "name": "My RB1", "pos": "RB", "val": 90},
+           {"id": "r2", "name": "My RB2", "pos": "RB", "val": 80},
+           {"id": "r3", "name": "My RB3", "pos": "RB", "val": 70}],
+    "WR": [{"id": "w1", "name": "My WR1", "pos": "WR", "val": 95},
+           {"id": "w2", "name": "My WR2", "pos": "WR", "val": 85},
+           {"id": "w3", "name": "My WR3", "pos": "WR", "val": 55}],
+    "TE": [{"id": "t1", "name": "My TE1", "pos": "TE", "val": 60}],
+}
+_O21DVAL = lambda x: x["val"] * (0.5 if x["id"] == "q1" else 1.0)  # noqa: E731
+_O21D = _E2LIN({p: [dict(x, val=_O21DVAL(x)) for x in lst]
+                for p, lst in _O21P.items()})
+_O21CTX = dict(me_bypos=_O21P, dval_for=_O21DVAL,
+               lineup_ids_fn=_E2LIN,
+               my_lineup_dval=sum(x["val"] for x in _O21D),
+               my_lineup=_O21D,
+               my_lineup_ids={x["id"] for x in _O21D}, fp={})
+_d21, _s21, _st21, _v21 = tb.swap_delta(
+    {"id": "q1", "name": "Out QB", "pos": "QB", "val": 100},
+    {"id": "x9", "name": "New QB", "pos": "QB", "val": 75},
+    **_O21CTX)
+check("#21: Out starter dropped from the discounted baseline -> sits/starts "
+      "describe the same baseline as the delta, sent player never 'sits'",
+      _d21 == 15 and _st21 == ["New QB"] and _s21 == ["My TE1"]
+      and "Out QB" not in _s21 and _v21 is False,
+      f"delta={_d21} starts={_st21} sits={_s21}")
 # --- G4/G7: full chain — simulate -> snapshot -> board parse ---
 _ORIG_FETCH47 = fi.fetch_json
 
