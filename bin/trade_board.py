@@ -332,8 +332,11 @@ def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
 
     me_bypos: your {pos: [player dicts]}; dval_for: discounted value fn;
     lineup_ids_fn: projected-lineup fn; my_lineup_dval: current lineup
-    total; my_lineup/my_lineup_ids: current lineup; fp: {sid: (bye, ecr,
-    ...)} for the bye-cluster veto. Returns (delta, sits, starts, bye_veto).
+    total; my_lineup/my_lineup_ids: current lineup — caller contract (#21):
+    the discounted lineup the my_lineup_dval baseline was computed from, so
+    the delta number and the sits/starts text share one basis; fp: {sid:
+    (bye, ecr, ...)} for the bye-cluster veto. Returns (delta, sits, starts,
+    bye_veto).
     """
     new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
                      if x["id"] != mine["id"]]
@@ -1000,14 +1003,20 @@ def main():
                            for p, lst in bypos.items()})
 
     my_lineup_dval = sum(x["val"] for x in disc_lineup(me["bypos"]))
+    # #21: sits/starts must be diffed against the SAME lineup the delta
+    # baseline comes from (discounted), not the raw one. The raw
+    # my_lineup/my_lineup_ids stay untouched for the G8/G9 sections.
+    _my_lineup_d = disc_lineup(me["bypos"])
+    _my_lineup_d_ids = {x["id"] for x in _my_lineup_d}
 
     def sd(mine, theirs):
         # board-bound E2 delta: closure context -> module-level swap_delta
         # (the golden tests hit swap_delta directly with synthetic inputs)
         return swap_delta(mine, theirs, me_bypos=me["bypos"],
                           dval_for=dval_for, lineup_ids_fn=lineup_ids,
-                          my_lineup_dval=my_lineup_dval, my_lineup=my_lineup,
-                          my_lineup_ids=my_lineup_ids, fp=fp)
+                          my_lineup_dval=my_lineup_dval,
+                          my_lineup=_my_lineup_d,
+                          my_lineup_ids=_my_lineup_d_ids, fp=fp)
     rows = []
     dropped = 0
     bye_dropped = 0
@@ -1085,9 +1094,10 @@ def main():
                     bye_veto = True
                 elif others == 2:
                     delta -= 0.20 * dval_for(theirs)
-            sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
+            sits = [x["name"] for x in _my_lineup_d
+                    if x["id"] not in new_ids]
             starts = [x["name"] for x in new_lineup
-                      if x["id"] not in my_lineup_ids]
+                      if x["id"] not in _my_lineup_d_ids]
             return delta, sits, starts, bye_veto
 
         def show_2for1(a, b, theirs, partner, thins_them):
