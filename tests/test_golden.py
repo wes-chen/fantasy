@@ -227,6 +227,29 @@ check("ir_line: open IR shows dash names, no warning",
 check("ir_line: no IR slots -> no FULL warning",
       "IR FULL" not in tb.ir_line([], None, 0))
 
+# ---------------- #22: bye-group computation shared by roster + audit ---
+_bypos22 = {
+    "QB": [{"id": "q1", "name": "Q B1"}, {"id": "q2", "name": "Q B2"}],
+    "RB": [{"id": "r1", "name": "R B1"}],
+    "WR": [{"id": "w1", "name": "W R1"}, {"id": "w2", "name": "W R2"},
+           {"id": "w3", "name": "W R3"}],
+    "TE": [{"id": "t1", "name": "T E1"}],
+}
+_fp22 = {"q1": (7, 10, 1), "q2": (7, 20, 2), "r1": (5, 40, 3),
+         "w1": (7, 30, 2), "w2": (9, 60, 5), "w3": (7, 80, 7)}
+_groups22 = tb.bye_group_names(_bypos22, _fp22, ("QB", "RB", "WR", "TE"))
+check("#22: bye_group_names groups by week in position order",
+      _groups22 == {7: ["Q B1", "Q B2", "W R1", "W R3"], 5: ["R B1"],
+                    9: ["W R2"]},
+      f"got {_groups22}")
+check("#22: players with no FantasyPros bye data are absent",
+      not any("T E1" in names for names in _groups22.values()),
+      f"got {_groups22}")
+check("#22: empty bypos -> empty groups",
+      tb.bye_group_names({}, {}, ("QB",)) == {})
+check("#22: bye-week ordering of one-week groups is week-sorted at use",
+      sorted(_groups22) == [5, 7, 9])
+
 # ---------------- ADV-FF-18 / E14: acquisition path + slot arithmetic ---
 _NOW = 1790203000000  # fixed "now" (ms) for deterministic tests
 check("acquisition_path: dropped 1 day ago (2-day lock) -> claim",
@@ -1342,6 +1365,29 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         check(f"{tag}: header stable: {hdr[:30]}...", hdr in out)
     check(f"{tag}: hold-vs-spend line present",
           "hold-vs-spend" in out and "P(better target emerges" in out)
+    # #22: YOUR ROSTER must carry the same bye-stack warnings the audit
+    # flags — every week with 2+ of his players on bye gets a
+    # [BYE-STACK W..] tag on each of those roster lines. (Previously the
+    # counts were computed after the roster printed, so the tags never
+    # fired there.)
+    _roster_sec = out.split("=== YOUR ROSTER (by value) ===")[1].split(
+        "===")[0]
+    _audit_sec = out.split("=== BYE WEEK AUDIT (FantasyPros) ===")[1].split(
+        "=== BYE-CRATER FORECAST")[0]
+    _audit_groups = {}
+    for _m in re.finditer(r"^\s*Week (\d+): ([^<\n]+)", _audit_sec, re.M):
+        _audit_groups[int(_m.group(1))] = [
+            n.strip() for n in _m.group(2).split(",")]
+    for _w in sorted(_audit_groups):
+        _names = _audit_groups[_w]
+        if len(_names) < 2:
+            continue
+        _tagw = "[BYE-STACK W%d]" % _w
+        _got = _roster_sec.count(_tagw)
+        check("%s: #22 roster shows %s for %d-on-bye cluster"
+              % (tag, _tagw, len(_names)),
+              _got >= len(_names),
+              f"audit={_names}, roster tag hits={_got}")
     # G5 gate: the weight lines print iff Week >= 5 AND the nflverse
     # fetch produced multipliers (G1 degrades -> no multipliers).
     _wk = int(re.search(r"NFL Week (\d+) \|", out).group(1))
