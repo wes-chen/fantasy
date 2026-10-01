@@ -21,8 +21,9 @@ profiles mined from those deals (G2 — who buys/sells which positions,
 how often, net FantasyCalc value), team needs vs effective starting
 slots, a playoff-odds + schedule-luck line from the weekly snapshot
 (G4 Monte Carlo playoff probabilities, G7 all-play expected wins vs
-actual), Wesley's roster by value (with FantasyPros bye weeks and, from
-Week 5, G5 playoff-schedule tags `[P+]`/`[P-]` weighting the W15-17
+actual), Wesley's roster by value (with FantasyPros bye weeks — 2+ players on the
+same bye carry a `[BYE-STACK W..]` warning right in the roster lines — and,
+from Week 5, G5 playoff-schedule tags `[P+]`/`[P-]` weighting the W15-17
 slate x0.9-1.1), a bye-week audit, a 4-week bye-crater forecast (G9 —
 2+ projected starters on the same bye flagged), a value-divergence
 section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated ROS feed only, never draft ranks (gh #24); |diff|
