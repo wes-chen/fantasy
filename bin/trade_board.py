@@ -300,6 +300,22 @@ def count_flex_slots(roster_positions):
     real offensive slots are 9.)"""
     return sum(1 for s in roster_positions if s == "FLEX")
 
+def bye_group_names(bypos, fp, positions):
+    """Bye-week groups for Wesley's own roster: {bye_week: [names]}.
+
+    #22: computed ONCE, before YOUR ROSTER prints, so _btag() can carry
+    the [BYE-STACK W..] warning in the at-a-glance roster view; the
+    BYE WEEK AUDIT section reuses the same groups. Players with no
+    FantasyPros bye data are simply absent (fp maps sid ->
+    (bye_week, ecr_rank, tier))."""
+    groups = {}
+    for p in positions:
+        for x in bypos.get(p, []):
+            b = fp.get(x["id"], (None, None, None))[0]
+            if b:
+                groups.setdefault(b, []).append(x["name"])
+    return groups
+
 def load_pending_offers(path):
     """Wesley's own open trade offers. Returns {player_id: info} for
     status=pending rows. (ADV-FF-07: engine must not double-commit a player
@@ -770,7 +786,7 @@ def main():
                 out.append((pls[-1], p))
         return out
 
-    my_bye_counts = {}  # filled by the bye audit before swaps print
+    my_bye_counts = {}  # filled just below, before YOUR ROSTER prints
 
     def _btag(x):
         b = fp.get(x["id"], (None, None, None))[0]
@@ -831,6 +847,13 @@ def main():
     # --- your chips & needs ---
     me = teams[my_rid]
 
+    # Bye-stack counts must be filled BEFORE "YOUR ROSTER" prints (#22):
+    # _btag() reads my_bye_counts, so computing here lets the at-a-glance
+    # roster view carry the [BYE-STACK W..] warnings the BYE WEEK AUDIT
+    # section prints later. The audit reuses the same groups.
+    bye_groups = bye_group_names(me["bypos"], fp, eff_slots)
+    my_bye_counts = {b: len(v) for b, v in bye_groups.items()}
+
     def lineup_ids(bypos):
         """Your projected starting lineup, by FantasyCalc redraft value:
         fill base slots first, then flex slots with the best remaining
@@ -872,22 +895,15 @@ def main():
         print()
 
     print("=== BYE WEEK AUDIT (FantasyPros) ===")
-    if fp:
-        bye_groups = {}
-        for p in eff_slots:
-            for x in me["bypos"].get(p, []):
-                b = fp.get(x["id"], (None, None, None))[0]
-                if b:
-                    bye_groups.setdefault(b, []).append(x["name"])
-        my_bye_counts = {b: len(v) for b, v in bye_groups.items()}
+    if not fp:
+        print("  (skipped: no FantasyPros data)")
+    else:
         for b in sorted(bye_groups):
             names = bye_groups[b]
             flag = "  <-- CLUSTER (avoid adding more)" if len(names) >= 3 else ""
             print(f"  Week {b}: {', '.join(names)}{flag}")
         if not bye_groups:
             print("  (no bye data matched)")
-    else:
-        print("  (skipped: no FantasyPros data)")
     print()
     print("=== BYE-CRATER FORECAST (G9: next 4 weeks) ===")
     try:
