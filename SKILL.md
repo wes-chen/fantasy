@@ -36,7 +36,10 @@ lineup by FantasyCalc redraft value, not the smallest value gap —
 each row carries a fairness band on the value gap: <10% EXCELLENT,
 10–20% FAIR, 20–35% STRETCH, >35% UNFAIR, calibrated against this
 league's largest accepted gap, which the LEAGUE TRADE HISTORY section
-prints as the live edge of the bands every run), bye weeks and bye-stack
+prints as the live edge of the bands every run — the gap is always
+computed on raw FantasyCalc market values in both sections, so the band
+labels mean the same thing everywhere; injury discounts and G5
+playoff-schedule weights apply only to the lineup-points delta (#19)), bye weeks and bye-stack
 warnings, and exactly who starts and who sits after the deal; lateral
 swaps where the incoming player can't crack his projected starting
 lineup are dropped outright), a 2-for-1 consolidation section (E3 —
@@ -138,9 +141,14 @@ be redundant):
    - 4-team: the wire is an ocean. Replacement level is roughly the top
      60 players; bench spots past ~8 have near-zero value. The strategy
      is consolidation: 2-for-1s turning two starters into one elite,
-     stars over depth. Stream QB/TE/K/DEF freely, drop without
-     sentiment, and never pay real trade value for depth — the wire
-     gives it away.
+     stars over depth. **Always stream QB and DEF (his standing call
+     2026-10-02): never roster a backup at these positions — every week
+     start the best wire option by matchup, drop without sentiment.
+     The freed spots go to RB/WR lotto tickets, never a second QB/DEF.
+     K is NOT streamed — Brandon Aubrey is set-and-forget.
+     Adds are FA NOW (instant, no priority cost), so there is no reason
+     to hold.** TE is stream-optional (currently holding Kincaid).
+     Never pay real trade value for depth — the wire gives it away.
 7. **Waiver wire is part of every recommendation.** Check the engine's
    waiver section before proposing a trade: if a free agent is within
    ~80% of a trade target's value at a thin position, say so — the wire
