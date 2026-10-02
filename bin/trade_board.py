@@ -57,6 +57,17 @@ def fairness_band(gap):
         return "STRETCH"
     return "UNFAIR"
 
+
+def fairness_gap(mine_total, theirs_total):
+    """Fairness gap between two sides' RAW FantasyCalc market values.
+    The gap is a market-price concept: how far apart the two sides' market
+    values are. It is ALWAYS computed on raw values in every section —
+    injury discounts (E5) and playoff-schedule weights (G5) belong in the
+    lineup-points delta, where they already live. (#19: the 2-for-1
+    section used discounted values while 1-for-1 used raw, so the same
+    band label meant two different things on one page.)"""
+    return abs(mine_total - theirs_total) / max(mine_total, theirs_total, 1)
+
 def wire_richness(num_teams):
     """Wire talent density: small-league wires are rich (replacement level
     is high, a better target almost always emerges); 14-team wires are a
@@ -796,8 +807,9 @@ def main():
         return f"[bye {b}]{stack}"
 
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
-        gap = abs(mine["val"] - theirs["val"]) / max(
-            mine["val"], theirs["val"], 1)
+        # #19: fairness gap on RAW market values (same basis as the
+        # 2-for-1 section) — the bands are one calibrated language.
+        gap = fairness_gap(mine["val"], theirs["val"])
         delta, sits, starts, _ = sd(mine, theirs)
         tag = " [CREATES YOUR %s HOLE]" % mine["pos"] if hole else ""
         thin = " (thins %s)" % ("you" if mflag else "them") if mflag or tflag else ""
@@ -1117,8 +1129,11 @@ def main():
             return delta, sits, starts, bye_veto
 
         def show_2for1(a, b, theirs, partner, thins_them):
-            da, db, dt = dval_for(a), dval_for(b), dval_for(theirs)
-            gap = abs((da + db) - dt) / max(da + db, dt, 1)
+            # #19: fairness gap on RAW market values — the same basis the
+            # 1-for-1 section uses. Injury discounts / G5 playoff weights
+            # belong in the lineup delta (swap_delta_2for1, which already
+            # uses them), not in the fairness read.
+            gap = fairness_gap(a["val"] + b["val"], theirs["val"])
             delta, sits, _, _ = swap_delta_2for1(a, b, theirs)
             tag = " [THINS THEM]" if thins_them else ""
             fit = ("; " + theirs["name"] + " starts"
