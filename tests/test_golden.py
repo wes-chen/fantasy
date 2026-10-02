@@ -177,6 +177,16 @@ check("E6: band 35% -> STRETCH (boundary)",
       tb.fairness_band(0.35) == "STRETCH")
 check("E6: band 36% -> UNFAIR", tb.fairness_band(0.36) == "UNFAIR")
 
+# ---------------- #19: fairness gap always on raw market values ---------
+check("#19: raw-value gap formula",
+      tb.fairness_gap(4000, 3000) == abs(4000 - 3000) / 4000)
+check("#19: zero/zero -> 0, no crash", tb.fairness_gap(0, 0) == 0)
+check("#19: an Out discount (0.5x) would shrink the gap under the old "
+      "2-for-1 basis — the raw basis must not move",
+      tb.fairness_gap(4000, 3000) == 0.25
+      and tb.fairness_gap(4000, 3000 * 0.5) > tb.fairness_gap(4000, 3000),
+      "gap must be computed on market values, not injury-discounted ones")
+
 # ---------------- E7: value ranges + low-signal flag ----------------
 check("E7: range half-width = 50% of |trend30d|",
       tb.value_range(4000, 800) == (3600, 4400))
@@ -1562,6 +1572,37 @@ out_snap = run_board(SNAPUSA).stdout
 check("E3: snapusa never prints 2-for-1s (depth is currency there)",
       "=== 2-FOR-1 CONSOLIDATION" not in out_snap,
       "2-for-1 section leaked into the 14-team board")
+
+# --- #19: fairness gaps are raw-market-basis in BOTH swap sections -------
+# Each printed row carries its players' raw FantasyCalc values, so the
+# test recomputes the gap from the row's own values. Under the old 2-for-1
+# basis (injury-discounted / G5-weighted) any row with a discounted or
+# weighted player fails this — from Week 5 the G5 weights make that
+# nearly every row, so a regression here goes red fast.
+def _gap_row_ok(ln):
+    _vals = [float(x) for x in
+             re.findall(r"\((\d+(?:\.\d+)?), \d+(?:\.\d+)?-\d+(?:\.\d+)?\)",
+                        ln)]
+    _mg = re.search(r"\[gap(?: vs combined)? (\d+)%\|([A-Z]+)\]", ln)
+    if len(_vals) not in (2, 3) or not _mg:
+        return "unparseable: %s" % ln[:100]
+    _gap = tb.fairness_gap(sum(_vals[:-1]), _vals[-1])
+    if f"{_mg.group(1)}%" != f"{_gap:.0%}":
+        return "gap basis mismatch: %s" % ln[:100]
+    if _mg.group(2) != tb.fairness_band(_gap):
+        return "band mismatch: %s" % ln[:100]
+    return None
+
+
+_19_lines = [ln for _o in (out, out_ww) for ln in _o.splitlines()
+             if "you send" in ln and "[gap" in ln]
+_19_bad = [b for b in (_gap_row_ok(ln) for ln in _19_lines) if b]
+check("#19: printed fairness gaps in both swap sections recompute from "
+      "the rows' raw market values (or the honest no-fits stub)",
+      (_19_lines and not _19_bad)
+      or any("(no clean 1-for-1 fits)" in ln
+             for _o in (out, out_ww) for ln in _o.splitlines()),
+      f"mismatches: {_19_bad[:3]} (rows checked: {len(_19_lines)})")
 check("NF-01: WW slot line self-consistent",
       bool(_m2) and (("— SCARCE" in _m2.group(0))
                      == (int(_m2.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
