@@ -40,7 +40,9 @@ prints as the live edge of the bands every run — the gap is always
 computed on raw FantasyCalc market values in both sections, so the band
 labels mean the same thing everywhere; injury discounts and G5
 playoff-schedule weights apply only to the lineup-points delta (#19)), bye weeks and bye-stack
-warnings, and exactly who starts and who sits after the deal; lateral
+warnings, and exactly who starts and who sits after the deal (the sent player is
+gone, never listed as sitting; "sits" names only kept players who were
+starting and are now benched); lateral
 swaps where the incoming player can't crack his projected starting
 lineup are dropped outright), a 2-for-1 consolidation section (E3 —
 4-team league only: two surplus pieces for one partner elite, ranked by
