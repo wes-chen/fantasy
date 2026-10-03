@@ -364,6 +364,8 @@ def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
     the delta number and the sits/starts text share one basis; fp: {sid:
     (bye, ecr, ...)} for the bye-cluster veto. Returns (delta, sits, starts,
     bye_veto).
+    #27: sits names only players Wesley still rosters who were starting and
+    are now benched — the sent player is excluded (he's gone, not benched).
     """
     new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
                      if x["id"] != mine["id"]]
@@ -382,7 +384,8 @@ def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
             bye_veto = True  # would push the bye week to 4+ starters
         elif others == 2:
             delta -= 0.20 * dval_for(theirs)  # 3-starter cluster penalty
-    sits = [x["name"] for x in my_lineup if x["id"] not in new_ids]
+    sits = [x["name"] for x in my_lineup  # #27: the sent player is gone,
+            if x["id"] not in new_ids and x["id"] != mine["id"]]
     starts = [x["name"] for x in new_lineup
               if x["id"] not in my_lineup_ids]
     return delta, sits, starts, bye_veto
@@ -1122,8 +1125,8 @@ def main():
                     bye_veto = True
                 elif others == 2:
                     delta -= 0.20 * dval_for(theirs)
-            sits = [x["name"] for x in _my_lineup_d
-                    if x["id"] not in new_ids]
+            sits = [x["name"] for x in _my_lineup_d  # #27: both sent
+                    if x["id"] not in new_ids and x["id"] not in gone]
             starts = [x["name"] for x in new_lineup
                       if x["id"] not in _my_lineup_d_ids]
             return delta, sits, starts, bye_veto
