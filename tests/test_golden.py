@@ -1008,8 +1008,9 @@ check("E2: lateral equal-value swap that can't crack the lineup -> "
 _d_pos, _s_pos, _st_pos, _v_pos = tb.swap_delta(
     _MINE3, {"id": "x2", "name": "Stud RB", "pos": "RB", "val": 100},
     **_E2CTX)
-check("E2: upgrade swap -> positive delta, incoming starts, outgoing sits",
-      _d_pos == 30 and _st_pos == ["Stud RB"] and _s_pos == ["My RB3"]
+check("E2: upgrade swap -> positive delta, incoming starts, sent player is "
+      "gone not benched (#27)",
+      _d_pos == 30 and _st_pos == ["Stud RB"] and _s_pos == []
       and _v_pos is False,
       f"delta={_d_pos} starts={_st_pos} sits={_s_pos}")
 # the board's row filter + sort: delta<=0 never ranks, positive first
@@ -1065,6 +1066,26 @@ check("#21: Out starter dropped from the discounted baseline -> sits/starts "
       _d21 == 15 and _st21 == ["New QB"] and _s21 == ["My TE1"]
       and "Out QB" not in _s21 and _v21 is False,
       f"delta={_d21} starts={_st21} sits={_s21}")
+# --- #27: the sent player is gone, not "sits" ---
+# r1 is a projected starter (val 90, in the top-6). Sending him for a stud:
+# pre-fix the one-liner listed him under "sits" (he can never be in the
+# new lineup, so any sent starter landed there unconditionally).
+_MINE27 = {"id": "r1", "name": "My RB1", "pos": "RB", "val": 90}
+_IN27 = {"id": "x4", "name": "Stud RB", "pos": "RB", "val": 120}
+_d27, _s27, _st27, _v27 = tb.swap_delta(_MINE27, _IN27, **_E2CTX)
+check("#27: sent starter excluded from sits (gone, not benched); "
+      "incoming still starts",
+      _d27 == 30 and _st27 == ["Stud RB"] and _s27 == []
+      and "My RB1" not in _s27 and _v27 is False,
+      f"delta={_d27} starts={_st27} sits={_s27}")
+_nb27 = {p: [dict(x) for x in lst if x["id"] != "r1"]
+         for p, lst in _E2P.items()}
+_nb27["RB"].append(dict(_IN27))
+_old27 = [x["name"] for x in _E2MY
+          if x["id"] not in {x["id"] for x in _E2LIN(_nb27)}]
+check("#27 negative control: the pre-fix one-liner listed the sent "
+      "starter under sits",
+      _old27 == ["My RB1"], f"old sits={_old27}")
 # --- G4/G7: full chain — simulate -> snapshot -> board parse ---
 _ORIG_FETCH47 = fi.fetch_json
 
@@ -1459,7 +1480,8 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     # and a slot-check line validates live roster math before emitting.
     check(f"{tag}: slot-check line with live roster math (E14)",
           re.search(r"  slot check: active \d+/\d+ — "
-                    r"(FULL: every ADD needs a DROP|open bench slot\(s\))",
+                    r"(FULL: every ADD needs a DROP|\d+ open bench "
+                    r"slot\(s\))",
                     out) is not None)
     _moves = [ln for ln in out.splitlines()
               if ln.startswith("  ADD ") and " / DROP " in ln]
