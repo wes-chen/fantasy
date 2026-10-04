@@ -480,6 +480,73 @@ def get_fp_ecr(players, ppr):
         fp[sid] = (bye, pl.get("rank_ecr"), pl.get("tier"))
     return fp, d.get("last_updated")
 
+def get_fp_kdef(players):
+    """FantasyPros rest-of-season ECR ranks for K and DST (#20).
+
+    FantasyCalc publishes no value feed for K/DEF, so the waiver engine
+    prices them by FantasyPros ROS rank instead of the value gate.
+    Scraped from ros-k.php and ros-dst.php (same `var ecrData` embed as
+    the overall page; `ranking_type_name` must be "ros" or the feed is
+    rejected, same as #24). Sleeper stores DEFs with full_name=None and
+    the team abbrev as the player_id, so they are joined on
+    "first_name last_name" (e.g. "Houston Texans"). Returns
+    {sleeper_id: ecr_rank}. Raises on fetch/parse failure; the caller
+    degrades to {} and the K/DEF waiver branch keeps only the
+    forced-replacement path.
+    """
+    _ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+           "AppleWebKit/537.36 (KHTML, like Gecko) "
+           "Chrome/126.0 Safari/537.36")
+    name2sid = {}
+    def _key(p):
+        # prefer active, fantasy-relevant players on name collisions
+        return (0 if p.get("active") else 1, p.get("search_rank") or 9999999)
+    for pid, p in players.items():
+        if not isinstance(p, dict) or p.get("position") not in ("K", "DEF"):
+            continue
+        nm = (p.get("full_name")
+              or f"{p.get('first_name') or ''} {p.get('last_name') or ''}"
+              .strip())
+        if not nm:
+            continue
+        k = norm_name(nm)
+        cur = name2sid.get(k)
+        if cur is None or _key(p) < _key(players[cur]):
+            name2sid[k] = str(pid)
+    out = {}
+    for slug in ("ros-k.php", "ros-dst.php"):
+        url = f"https://www.fantasypros.com/nfl/rankings/{slug}"
+        req = urllib.request.Request(url, headers={"User-Agent": _ua})
+        html = urllib.request.urlopen(req, timeout=30).read().decode(
+            "utf-8", "replace")
+        m = re.search(r"var ecrData = (\{.*?\});\s*\n", html, re.S)
+        d = json.loads(m.group(1))
+        if d.get("ranking_type_name") != "ros":
+            raise ValueError(
+                f"FantasyPros served a non-ROS page at {url} "
+                f"(ranking_type_name={d.get('ranking_type_name')!r}) — "
+                "refusing to rank K/DEF off it")
+        for pl in d.get("players") or []:
+            sid = name2sid.get(norm_name(pl.get("player_name")))
+            if sid and pl.get("rank_ecr"):
+                out[sid] = pl["rank_ecr"]
+    return out
+
+# K/DEF streaming gates (#20): only suggest a swap for a genuinely good
+# unit (FP ROS rank <= KDEF_STREAM_TOP) that is decisively better than
+# his current one (KDEF_RANK_GAP spots or more). Mirrors the 1.4x churn
+# spirit — no rank-25-vs-rank-33 churn on a 14-team wire.
+KDEF_STREAM_TOP = 12
+KDEF_RANK_GAP = 8
+
+def kdef_upgrade_suggests(fa_rank, cur_rank):
+    """#20: decisive top-12 upgrade gate for K/DEF waiver suggestions.
+    Ranks are FantasyPros ROS within-position ranks (lower is better);
+    missing ranks on either side mean no suggestion."""
+    return bool(fa_rank and cur_rank
+                and fa_rank <= KDEF_STREAM_TOP
+                and fa_rank + KDEF_RANK_GAP <= cur_rank)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--league", required=True)
@@ -547,6 +614,14 @@ def main():
         fp, fp_updated = get_fp_ecr(players, ppr)
     except Exception:
         fp, fp_updated = {}, None
+
+    # --- FantasyPros ROS ranks for K/DST (#20): the only price signal for
+    # K/DEF, since FantasyCalc omits them. Degrades to {} — the waiver
+    # branch below then keeps only the forced-replacement path.
+    try:
+        kdef_fp = get_fp_kdef(players)
+    except Exception:
+        kdef_fp = {}
 
     # --- nflverse bulk data: powers G1 (usage gaps), G5 (playoff SOS
     # weighting) and G6 (handcuff map). Cached 24h; every consumer below
@@ -1277,9 +1352,14 @@ def main():
     for pos in WPOS:
         fa_by_pos.setdefault(pos, []).sort(reverse=True)
         def _fa_fmt(v, n, inj, pid_s):
-            # K/DEF have no value feed (FantasyCalc omits them; Sleeper
-            # projections are empty) — label them unpriced, not zero.
-            val = fstr(pid_s, v) if (v or pos not in ("K", "DEF")) else "unpriced"
+            # K/DEF have no value feed (FantasyCalc omits them) — price by
+            # FantasyPros ROS rank instead (#20); "unpriced" only when the
+            # FP feed is unavailable this run.
+            if pos in ("K", "DEF"):
+                _r = kdef_fp.get(pid_s)
+                val = f"FP-ROS #{_r}" if _r else "unpriced"
+            else:
+                val = fstr(pid_s, v)
             return (f"{n}({val}){_btag({'id': pid_s})}"
                     + (f"[!{inj}]" if inj else ""))
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
@@ -1345,41 +1425,54 @@ def main():
     for pos in WPOS:
         if not fa_by_pos.get(pos):
             continue
-        fav, fan, fainj, fapid = fa_by_pos[pos][0]
-        if fav <= 0 or fainj in HURT:
-            continue  # never suggest adding an injured player
         if pos in ("K", "DEF"):
-            # ADV-FF-06: the natural drop for a K/DEF add is your current
-            # unit at that position, not a QB/RB/WR/TE bench player.
-            # No value feed prices K/DEF, so the value gate only fires if
-            # one ever appears; the fallback is a health signal — a hurt
-            # starter must be replaced from the top healthy FAs.
-            # The drop pool honors the FULL-roster rule (reserve occupants
-            # can't free an active slot).
+            # ADV-FF-06 + #20: the natural drop for a K/DEF add is your
+            # current unit at that position, not a QB/RB/WR/TE bench
+            # player. K/DEF have no FantasyCalc value feed (always 0), so
+            # this branch used to sit below the `fav <= 0` gate — which made
+            # it unreachable forever, including the forced-replacement
+            # path. It is priced by FantasyPros ROS rank instead. An injured
+            # top FA must not kill the whole position, so the top HEALTHY
+            # FA is the candidate. The drop pool honors the FULL-roster rule
+            # (reserve occupants can't free an active slot).
             mine = legal_drops(sorted(me["bypos"].get(pos, []),
                                       key=lambda x: x["val"]),
                                _sm["reserve_ids"], _sm["drop_needed"])
-            if mine and fav > mine[0]["val"] * CHURN_THRESHOLD:
-                _p = _path(fapid)
-                sug.append((fav - mine[0]["val"], fav, mine[0]["val"],
-                            False, fapid, _p,
-                            f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
-                            f"DROP {mine[0]['name']} ({pos},{mine[0]['val']})"
-                            + _pathtag(_p)))
-            elif mine and not fainj:
+            _hfa = next(((v, n, i, s) for v, n, i, s
+                         in fa_by_pos[pos] if i not in HURT), None)
+            if mine and _hfa:
+                _, _fan, _, _fapid = _hfa
                 cur = mine[0]
                 cur_inj = ((players.get(cur["id"], {}) or {})
                            .get("injury_status") or "")
+                _p = _path(_fapid)
                 if cur_inj in HURT:
                     # forced replacement: a hurt starter must be replaced —
                     # edge is 0 but NF-01 never flags a forced move
-                    _p = _path(fapid)
-                    sug.append((0, 0, cur["val"], True, fapid, _p,
-                                f"  ADD {fan} ({pos}) / "
+                    sug.append((0, 0, cur["val"], True, _fapid, _p,
+                                f"  ADD {_fan} ({pos}) / "
                                 f"DROP {cur['name']} ({pos}) — "
                                 f"your {pos} is {cur_inj}"
                                 + _pathtag(_p)))
+                else:
+                    _fa_rank = kdef_fp.get(_fapid)
+                    _cur_rank = kdef_fp.get(cur["id"])
+                    if kdef_upgrade_suggests(_fa_rank, _cur_rank):
+                        # dropv 0: unpriced on both sides, so NF-01's
+                        # scarce-slot veto (edge < X * dropv) can't fire —
+                        # a decisive top-12 upgrade is never a thin spend.
+                        # The rank-delta edge joins the hold-vs-spend
+                        # median; K/DEF upgrades are rare enough not to
+                        # move it.
+                        sug.append((_cur_rank - _fa_rank, 0, 0, False,
+                                    _fapid, _p,
+                                    f"  ADD {_fan} ({pos},FP-ROS #{_fa_rank}) / "
+                                    f"DROP {cur['name']} ({pos},FP-ROS #{_cur_rank})"
+                                    + _pathtag(_p)))
             continue
+        fav, fan, fainj, fapid = fa_by_pos[pos][0]
+        if fav <= 0 or fainj in HURT:
+            continue  # never suggest adding an injured player
         for b in _drop_pool:
             if fav > b["val"] * CHURN_THRESHOLD:
                 _p = _path(fapid)
