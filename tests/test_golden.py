@@ -130,6 +130,85 @@ try:
 finally:
     _urlreq.urlopen = _saved_fp_urlopen
 
+# ---------------- #20: FantasyPros ROS K/DST ranks (K/DEF price signal) ----
+_K_HTML = ("var ecrData = {\"ranking_type_name\":\"ros\",\"last_updated\":"
+           "\"10\\/04\",\"players\":[{\"player_name\":\"Brandon Aubrey\","
+           "\"rank_ecr\":1},{\"player_name\":\"Chase McLaughlin\","
+           "\"rank_ecr\":25}]};\n")
+_D_HTML = ("var ecrData = {\"ranking_type_name\":\"ros\",\"last_updated\":"
+           "\"10\\/04\",\"players\":[{\"player_name\":\"Houston Texans\","
+           "\"rank_ecr\":2},{\"player_name\":\"New York Giants\","
+           "\"rank_ecr\":24}]};\n")
+_D_DRAFT_HTML = ("var ecrData = {\"ranking_type_name\":\"draft\","
+                 "\"last_updated\":\"8\\/01\",\"players\":[]};\n")
+
+
+class _kd_urlopen:
+    def __call__(self, req, *a, **k):
+        slug = req.full_url.rsplit("/", 1)[-1]
+        page = {"ros-k.php": _K_HTML, "ros-dst.php": _D_HTML}[slug]
+
+        class _Resp:
+            def read(self):
+                return page.encode()
+        return _Resp()
+
+
+_kd_players = {
+    "11533": {"full_name": "Brandon Aubrey", "position": "K", "team": "DAL",
+              "active": True, "search_rank": 100},
+    "99999": {"full_name": "Chase McLaughlin", "position": "K", "team": "TB",
+              "active": True, "search_rank": 200},
+    "HOU": {"full_name": None, "first_name": "Houston",
+            "last_name": "Texans", "position": "DEF", "team": "HOU",
+            "active": True, "search_rank": 50},
+    "NYG": {"full_name": None, "first_name": "New York",
+            "last_name": "Giants", "position": "DEF", "team": "NYG",
+            "active": True, "search_rank": 60},
+    "123": {"full_name": "Some QB", "position": "QB",
+            "active": True, "search_rank": 1},
+}
+_saved_kd_urlopen = _urlreq.urlopen
+_urlreq.urlopen = _kd_urlopen()
+try:
+    _kr = tb.get_fp_kdef(_kd_players)
+    check("#20: K ranks map by name, DEFs join on first+last name",
+          _kr == {"11533": 1, "99999": 25, "HOU": 2, "NYG": 24},
+          f"got {_kr}")
+    check("#20: non-K/DEF players are excluded from the rank map",
+          "123" not in _kr)
+finally:
+    _urlreq.urlopen = _saved_kd_urlopen
+
+
+class _kd_draft_urlopen:
+    def __call__(self, req, *a, **k):
+        class _Resp:
+            def read(self):
+                return _D_DRAFT_HTML.encode()
+        return _Resp()
+
+
+_saved_kd2_urlopen = _urlreq.urlopen
+_urlreq.urlopen = _kd_draft_urlopen()
+_kd_rejected = False
+try:
+    tb.get_fp_kdef(_kd_players)
+except ValueError:
+    _kd_rejected = True
+finally:
+    _urlreq.urlopen = _saved_kd2_urlopen
+check("#20: draft-type K/DST page is REJECTED, never ranked as ROS",
+      _kd_rejected)
+
+check("#20: gate: top-12 unit 8+ ranks better suggests",
+      tb.kdef_upgrade_suggests(2, 24) and tb.kdef_upgrade_suggests(12, 20))
+check("#20: gate: outside top-12 / gap too small / missing ranks don't",
+      not tb.kdef_upgrade_suggests(13, 30)
+      and not tb.kdef_upgrade_suggests(2, 9)
+      and not tb.kdef_upgrade_suggests(None, 24)
+      and not tb.kdef_upgrade_suggests(2, None))
+
 # ---------------- E5: season-timing injury discount ----------------
 _approx = lambda got, want: abs(got - want) < 1e-9
 check("E5: Out wk3 -> 0.5 (no timing decay)",
@@ -1365,6 +1444,14 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: 2-flex model (ADV-FF-09)", "(+2 flex)" in out)
     check(f"{tag}: K waiver line (ADV-FF-06)", "top FA K:" in out)
     check(f"{tag}: DEF waiver line (ADV-FF-06)", "top FA DEF:" in out)
+    # #20: K/DEF top-FA lines price by FP ROS rank when the feed is live
+    # and degrade honestly to "unpriced" when it isn't — never a bare (0).
+    for _pos20 in ("K", "DEF"):
+        _tl20 = next((ln for ln in out.splitlines()
+                      if ln.startswith(f"  top FA {_pos20}:")), "")
+        check(f"{tag}: #20 top FA {_pos20} shows FP-ROS rank or unpriced",
+              bool(re.search(r"\(FP-ROS #\d+\)|\(unpriced\)", _tl20)),
+              f"line: {_tl20[:100]}")
     check(f"{tag}: swaps sorted by delta (ADV-FF-15)",
           "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===" in out)
     check(f"{tag}: trade-lock boundary line (ADV-FF-14)",
