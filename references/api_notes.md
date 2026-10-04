@@ -145,6 +145,22 @@ Notes (verified 2026-09-28):
 - `rank_ecr` vs FantasyCalc `overallRank`: |diff| >= 12 spots is flagged
   as a buy-low/hold (ECR higher) or sell-high (calc higher) candidate.
 
+### FantasyPros ROS ranks for K/DST (gh #20)
+
+FantasyCalc publishes no K/DEF values, so the waiver engine prices K/DEF
+by FantasyPros ROS rank instead of the value gate (verified the source
+2026-10-04: `ros-k.php` 38 kickers, `ros-dst.php` 32 defenses, both
+`ranking_type_name: "ros"`). `get_fp_kdef()` scrapes both pages (same
+`var ecrData` embed, same browser UA, same ros-type guard as the overall
+feed) and joins to Sleeper IDs on normalized names — DEFs via
+`"first_name last_name"` since Sleeper stores them with `full_name=None`
+(player_id is the team abbrev, e.g. `HOU`). Suggestion gates
+(`KDEF_STREAM_TOP=12`, `KDEF_RANK_GAP=8`): only name a swap for a top-12
+ROS unit at least 8 ranks better than his current one — the 1.4x churn
+spirit, no rank-25-vs-rank-33 churn on the 14-team wire. A hurt current
+unit is always a forced replacement (top healthy FA, any rank). Degrades
+to forced-replacement-only when the FP fetch fails.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
