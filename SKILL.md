@@ -53,7 +53,11 @@ on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
 and who holds him: mine/free/opponent), an IR-slot audit (E13 — used/open
 IR capacity from Sleeper's reserve_slots with a full-IR warning, since the
 next injury then costs an active roster spot), and a waiver-wire section (top
-free agents by position on FantasyCalc redraft value, trending velocity
+free agents by position on FantasyCalc redraft value — K/DEF carry no FC
+value, so the top FA K/DEF lines print their FantasyPros ROS rank instead
+and the suggestion engine streams only decisive upgrades: a top-12 ROS
+unit 8+ ranks better than his current one, or a forced replacement when
+his unit is hurt (#20), trending velocity
 (G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
 since the previous scan, from our own timestamped snapshot history:
 NEW/HEATING/COOLING), a slot-check line validating live roster math
