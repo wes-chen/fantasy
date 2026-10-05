@@ -73,6 +73,10 @@ and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
 named as drops)).
+A `=== PENDING OFFERS ===` section (ADV-FF-07) prints Wesley's own open
+offers and marks those players `[ON-BLOCK: ...]` in the roster — on-block
+is per-league (gh #26): an open snapusa offer never blocks the same player
+on the weekend-warriors board, and vice versa.
 The header also prints the season clock: current NFL week, weeks to the
 trade deadline, and the posture below.
 
