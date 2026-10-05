@@ -286,14 +286,31 @@ check("E7: big delta clears the flag",
 
 with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
     fh.write("# comment\n\n")
-    fh.write("6819 | Michael Pittman | ydai | 2026-09-20 | pending | x\n")
-    fh.write("1234 | Some Guy | mate | 2026-09-01 | rejected | y\n")
+    fh.write("6819 | Michael Pittman | ydai | 2026-09-20 | pending | snapusa | x\n")
+    fh.write("4321 | Dual Rostered | mate2 | 2026-09-21 | pending | ww | y\n")
+    fh.write("1234 | Some Guy | mate | 2026-09-01 | rejected | snapusa | z\n")
+    fh.write("5678 | Legacy Row | mate3 | 2026-09-02 | pending | z\n")
     tmp = fh.name
-parsed = tb.load_pending_offers(tmp)
+parsed_all = tb.load_pending_offers(tmp)
+parsed_snap = tb.load_pending_offers(tmp, "snapusa")
+parsed_ww = tb.load_pending_offers(tmp, "ww")
 os.unlink(tmp)
 check("pending offers: pending parsed, rejected ignored",
-      set(parsed) == {"6819"} and parsed["6819"]["partner"] == "ydai",
-      f"got {parsed}")
+      set(parsed_all) == {"6819", "4321", "5678"}
+      and parsed_all["6819"]["partner"] == "ydai"
+      and parsed_all["6819"]["league"] == "snapusa",
+      f"got {parsed_all}")
+check("#26: on-block is per-league (snapusa run sees only snapusa + legacy)",
+      set(parsed_snap) == {"6819", "5678"}, f"got {set(parsed_snap)}")
+check("#26: on-block is per-league (ww run sees only ww + legacy)",
+      set(parsed_ww) == {"4321", "5678"}, f"got {set(parsed_ww)}")
+check("#26: legacy row (no league column) blocks in every league",
+      parsed_snap["5678"]["league"] is None
+      and parsed_ww["5678"]["league"] is None)
+check("#26: league_tag maps both league ids",
+      tb.league_tag(SNAPUSA) == "snapusa" and tb.league_tag(WW) == "ww")
+check("#26: league_tag unknown id -> None (safe all-leagues fallback)",
+      tb.league_tag("999") is None)
 check("pending offers: missing file -> empty, no crash",
       tb.load_pending_offers("/nonexistent/path.md") == {})
 
@@ -457,6 +474,11 @@ check("pending_offers.md: registry parses; on-block set is dict rows only",
       isinstance(real, dict)
       and all(isinstance(v, dict) and "partner" in v for v in real.values()),
       f"got {real}")
+real_snap = tb.load_pending_offers(os.path.join(SKILL, "pending_offers.md"), "snapusa")
+real_ww = tb.load_pending_offers(os.path.join(SKILL, "pending_offers.md"), "ww")
+check("#26: league-scoped loads are subsets of the unscoped load",
+      set(real_snap) <= set(real) and set(real_ww) <= set(real),
+      "league scoping must only ever remove rows, never add")
 
 # ---------------- G1-G10 ----------------
 print("== G1-G10 unit ==")
