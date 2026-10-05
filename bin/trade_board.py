@@ -327,10 +327,29 @@ def bye_group_names(bypos, fp, positions):
                 groups.setdefault(b, []).append(x["name"])
     return groups
 
-def load_pending_offers(path):
+# League id -> short tag used by the pending-offers registry (gh #26:
+# on-block is per-league — an open offer in one league must not block the
+# same player on the other league's board).
+LEAGUE_TAGS = {
+    "1320161122837368832": "snapusa",
+    "1379714328738955264": "ww",
+}
+
+
+def league_tag(lid):
+    """Short registry tag for a Sleeper league id (None when unknown —
+    unknown leagues fall back to legacy behavior: all pending rows block)."""
+    return LEAGUE_TAGS.get(str(lid))
+
+
+def load_pending_offers(path, league=None):
     """Wesley's own open trade offers. Returns {player_id: info} for
     status=pending rows. (ADV-FF-07: engine must not double-commit a player
-    he has already offered.)"""
+    he has already offered.)
+
+    league: short tag ("snapusa"/"ww") scoping on-block per league (gh #26).
+    A row carrying a league tag blocks only in that league; legacy rows
+    with no league column block in every league (the old behavior)."""
     onblock = {}
     try:
         fh = open(path)
@@ -341,10 +360,22 @@ def load_pending_offers(path):
         if not line or line.startswith("#"):
             continue
         parts = [p.strip() for p in line.split("|")]
-        if len(parts) >= 5 and parts[4].lower() == "pending":
-            onblock[parts[0]] = {"name": parts[1], "partner": parts[2],
-                                 "date": parts[3],
-                                 "notes": parts[5] if len(parts) > 5 else ""}
+        if len(parts) < 5 or parts[4].lower() != "pending":
+            continue
+        # New format: ... | status | league | notes. The 6th column counts
+        # as a league tag only when it is a recognized one; anything else
+        # (legacy rows, typos) degrades to the safe all-leagues default.
+        if len(parts) >= 7 and parts[5].lower() in ("snapusa", "ww"):
+            row_league = parts[5].lower()
+            notes = "|".join(parts[6:]).strip()
+        else:
+            row_league = None
+            notes = "|".join(parts[5:]).strip()
+        if league is not None and row_league is not None and row_league != league:
+            continue
+        onblock[parts[0]] = {"name": parts[1], "partner": parts[2],
+                             "date": parts[3], "league": row_league,
+                             "notes": notes}
     return onblock
 
 def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
@@ -692,7 +723,7 @@ def main():
     # --- Wesley's own pending offers: ON-BLOCK players (ADV-FF-07) ---
     pending_path = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "pending_offers.md"))
-    onblock = load_pending_offers(pending_path)
+    onblock = load_pending_offers(pending_path, league_tag(a.league))
 
     def pname(pid):
         p = players.get(str(pid), {})
@@ -981,6 +1012,7 @@ def main():
         for pid, info in onblock.items():
             print(f"  {info['name']}: offered to {info['partner']} "
                   f"on {info['date']}"
+                  + (f" [{info['league']}]" if info["league"] else "")
                   + (f" ({info['notes']})" if info["notes"] else ""))
         print()
 
