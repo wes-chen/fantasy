@@ -30,7 +30,8 @@ section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated R
 >= 12 spots flagged as hold/buy-low or sell-high), a usage-gap radar
 (G1 — nflverse usage vs fantasy output: buy-low/sell-high on target
 share, air-yards share, snap%; routes are unavailable in every free
-source and are never synthesized), candidate swaps ranked by projected
+source and are never synthesized; players flagged Out/IR/Doubtful/
+Suspended are excluded from the radar entirely (#28)), candidate swaps ranked by projected
 lineup-points delta for him (the marginal gain to *his* optimal starting
 lineup by FantasyCalc redraft value, not the smallest value gap —
 each row carries a fairness band on the value gap: <10% EXCELLENT,
