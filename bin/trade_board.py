@@ -28,6 +28,23 @@ CHURN_THRESHOLD = 1.4  # persona veto (SKILL.md judgment 7): no ADD/DROP churn
 WPOS = ("QB", "RB", "WR", "TE", "K", "DEF")  # waiver model covers K/DEF:
                        # Wesley's real claims are mostly K/DST.
 HURT = ("Out", "IR", "Doubtful", "Suspended")  # never suggest adding
+
+
+def g1_veto_injured(buys, sells, inj_of):
+    """#28 (ADV-FF-19): injury veto for the G1 usage-gap radar.
+
+    The waiver engine excludes HURT-status players from suggestions, but
+    fi.usage_gaps() has no injury context — so a season-IR player
+    (De'Von Achane, torn ACL, 2026-10-05) surfaced as a WIRE "buy the
+    usage" target. Same veto here: drop any gap row whose Sleeper
+    injury_status is in HURT before the board emits HOLD/SHOP/TARGET/WIRE
+    lines. inj_of(nkey) -> injury_status string ("" when unknown).
+    Returns (kept_buys, kept_sells, n_vetoed). Unknown status stays.
+    """
+    kept_buys = [r for r in buys if (inj_of(r["nkey"]) or "") not in HURT]
+    kept_sells = [r for r in sells if (inj_of(r["nkey"]) or "") not in HURT]
+    return (kept_buys, kept_sells,
+            len(buys) - len(kept_buys) + len(sells) - len(kept_sells))
 # --- NF-01: waiver priority cost model (see gap-analysis NF-01) ---
 # The engine suggests ADD/DROP pairs but never priced the priority slot
 # burned. Opportunity cost = P(a better target emerges before the weekly
@@ -1079,6 +1096,15 @@ def main():
         if nfl_err or not nfl_usage:
             raise RuntimeError(nfl_err or "no usage rows")
         _buys, _sells = fi.usage_gaps(nfl_usage)
+        # #28 (ADV-FF-19): usage_gaps() is injury-blind — apply the same
+        # HURT veto the waiver engine uses before any HOLD/SHOP/TARGET/WIRE
+        # line emits, so a dead player can't surface as buy-the-usage bait.
+        _buys, _sells, _g1vetoed = g1_veto_injured(
+            _buys, _sells,
+            lambda _nk: ((players.get(str(sid_of_nkey(_nk)), {}) or {})
+                         .get("injury_status") or ""))
+        if _g1vetoed:
+            print(f"  ({_g1vetoed} usage-gap player(s) excluded: injured)")
         _my = {x["id"] for lst in me["bypos"].values() for x in lst}
         buy_low_sids = {sid_of_nkey(b["nkey"]) for b in _buys}
         buy_low_sids.discard(None)
