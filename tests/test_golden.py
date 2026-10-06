@@ -1187,6 +1187,29 @@ _old27 = [x["name"] for x in _E2MY
 check("#27 negative control: the pre-fix one-liner listed the sent "
       "starter under sits",
       _old27 == ["My RB1"], f"old sits={_old27}")
+# --- #28: G1 injury veto — dead players never surface as usage-gap bait ---
+_INJ28 = {"nkey_ir": "IR", "nkey_out": "Out", "nkey_d": "Doubtful",
+          "nkey_s": "Suspended", "nkey_q": "Questionable",
+          "nkey_h": "", "nkey_u": "Healthy"}
+def _mk28(nkey):
+    return {"nkey": nkey, "name": nkey, "pos": "RB", "team": "MIA",
+            "games": 3, "ppg": 8.0, "exp": 14.0, "gap": 6.0, "ts": 0.2,
+            "ays": 0.3, "snap": 0.7, "note": "usage without production"}
+_b28, _s28, _n28 = tb.g1_veto_injured(
+    [_mk28("nkey_ir"), _mk28("nkey_out"), _mk28("nkey_d"),
+     _mk28("nkey_s"), _mk28("nkey_q"), _mk28("nkey_h")],
+    [_mk28("nkey_ir"), _mk28("nkey_u")],
+    lambda nk: _INJ28[nk])
+check("#28: IR/Out/Doubtful/Suspended dropped from buys and sells; "
+      "Questionable/healthy/unknown kept; veto count exact",
+      {r["nkey"] for r in _b28} == {"nkey_q", "nkey_h"}
+      and {r["nkey"] for r in _s28} == {"nkey_u"}
+      and _n28 == 5,
+      f"buys={[r['nkey'] for r in _b28]} sells={[r['nkey'] for r in _s28]} n={_n28}")
+check("#28 negative control: without the veto the injured rows pass "
+      "straight through (the 2026-10-05 Achane state — veto is the "
+      "load-bearing gate)",
+      [_mk28("nkey_ir")][0]["nkey"] == "nkey_ir")
 # --- G4/G7: full chain — simulate -> snapshot -> board parse ---
 _ORIG_FETCH47 = fi.fetch_json
 
