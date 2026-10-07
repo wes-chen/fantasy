@@ -743,8 +743,11 @@ def main():
     onblock = load_pending_offers(pending_path, league_tag(a.league))
 
     def pname(pid):
-        p = players.get(str(pid), {})
-        return p.get("full_name") or str(pid)
+        # #29: DEFs render as "San Francisco 49ers DEF", not a bare "SF"
+        # abbrev or a missing-name blank (Sleeper stores them with
+        # full_name=None) — a readout built on the old fallback surfaced
+        # as "DEF: empty" in chat and Wesley caught it.
+        return fi.def_display_name(pid, players)
 
     def ppos(pid):
         return (players.get(str(pid), {}).get("position") or "?")
@@ -1021,6 +1024,21 @@ def main():
             + ("[ON-BLOCK: pending offer to %s]" % onblock[x["id"]]["partner"]
                if x["id"] in onblock else "")
             for x in pls))
+    # #29: K/DEF roster lines — the old roster print skipped these
+    # positions entirely, so a rostered DEF read as "empty" downstream
+    # (2026-10-06, Wesley caught it). Priced by FantasyPros ROS rank,
+    # the same #20 signal as the waiver lines — never a bare (0).
+    for p in ("K", "DEF"):
+        pls = me["bypos"].get(p, [])
+        def _kd_fmt(x):
+            _r = kdef_fp.get(x["id"])
+            return (f"{x['name']}({'FP-ROS #' + str(_r) if _r else 'unpriced'})"
+                    f"{_btag(x)}{ptag_of(x['id'])}"
+                    + ("[ON-BLOCK: pending offer to %s]"
+                       % onblock[x["id"]]["partner"]
+                       if x["id"] in onblock else ""))
+        print(f"  {p}: " + (", ".join(_kd_fmt(x) for x in pls)
+                            or "(none rostered)"))
     if me["ir"] or ir_slots:
         print(ir_line(me["ir"], ir_slots, len(me["ir"])))
     print()
@@ -1406,7 +1424,7 @@ def main():
         v = fval.get(pid_s, (0, 999, 999, 0, False))[0]
         inj = p.get("injury_status") or ""
         fa_by_pos.setdefault(pos, []).append(
-            (v, p.get("full_name") or pid_s, inj, pid_s))
+            (v, fi.def_display_name(pid_s, players), inj, pid_s))
     for pos in WPOS:
         fa_by_pos.setdefault(pos, []).sort(reverse=True)
         def _fa_fmt(v, n, inj, pid_s):
