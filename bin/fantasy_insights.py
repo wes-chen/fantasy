@@ -60,6 +60,25 @@ UA = {"User-Agent": "fantasy-insights/1.0"}
 
 # ---------------------------------------------------------------- shared
 
+def def_display_name(pid, players):
+    """#29: readout name for team defenses.
+
+    Sleeper stores DEFs with full_name=None and the team abbrev as the
+    player_id, so bare `full_name or pid` renders "SF" — a roster readout
+    built on that surfaced as "DEF: empty — you have no defense rostered"
+    in chat (2026-10-06, Wesley caught it). A DEF now renders as
+    "San Francisco 49ers DEF", never as a bare abbrev or missing.
+    """
+    p = (players or {}).get(str(pid))
+    if not isinstance(p, dict):
+        return str(pid)
+    if p.get("position") == "DEF" and not p.get("full_name"):
+        nm = (f"{p.get('first_name') or ''} "
+              f"{p.get('last_name') or ''}").strip()
+        return f"{nm} DEF" if nm else str(pid)
+    return p.get("full_name") or str(pid)
+
+
 def norm_name(n):
     n = (n or "").lower().replace(".", "").replace("'", "").replace("-", " ")
     n = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", n)
@@ -452,8 +471,7 @@ def trending_velocity(current, prev, players, rostered):
         else:
             accel, base, tag = None, "—", "NEW"
         out.append({"sid": pid,
-                    "name": (p.get("full_name") or pid)
-                    if isinstance(p, dict) else pid,
+                    "name": def_display_name(pid, players),
                     "pos": pos, "c24": c24 or 0,
                     "accel": accel, "base": base, "tag": tag})
     _rank = {"NEW": 0, "HEATING": 1, "STEADY": 2, "COOLING": 3}
@@ -1215,7 +1233,7 @@ def cmd_game_odds(a):
             pos = p.get("position") or "?"
             team = (str(pid) if pos == "DEF"
                     else (p.get("team") or "?"))
-            my_players[str(pid)] = (p.get("full_name") or str(pid), pos, team)
+            my_players[str(pid)] = (def_display_name(pid, players), pos, team)
     try:
         paths = nflverse_paths(keys=("games",))
         priced, errors = fetch_week_odds(paths["games"], nfl_week)
