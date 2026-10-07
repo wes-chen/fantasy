@@ -1210,6 +1210,23 @@ check("#28 negative control: without the veto the injured rows pass "
       "straight through (the 2026-10-05 Achane state — veto is the "
       "load-bearing gate)",
       [_mk28("nkey_ir")][0]["nkey"] == "nkey_ir")
+# --- #29: DEFs never render as a bare abbrev or missing name -----------
+_DEF29 = {"SF": {"position": "DEF", "first_name": "San Francisco",
+                 "last_name": "49ers", "full_name": None, "team": "SF"},
+          "BA": {"position": "K", "full_name": "Brandon Aubrey"},
+          "SF_NM": {"position": "DEF", "full_name": "San Francisco 49ers"},
+          "NO_FN": {"position": "DEF", "first_name": None,
+                    "last_name": None, "full_name": None}}
+check("#29: DEF with full_name=None renders 'first last DEF'",
+      fi.def_display_name("SF", _DEF29) == "San Francisco 49ers DEF",
+      f"got {fi.def_display_name('SF', _DEF29)!r}")
+check("#29: K and named players keep full_name; unknown ids echo the id",
+      fi.def_display_name("BA", _DEF29) == "Brandon Aubrey"
+      and fi.def_display_name("SF_NM", _DEF29) == "San Francisco 49ers"
+      and fi.def_display_name("XXX", _DEF29) == "XXX")
+check("#29: DEF with no usable name parts falls back to the player id",
+      fi.def_display_name("NO_FN", _DEF29) == "NO_FN"
+      and fi.def_display_name("ZZ", {}) == "ZZ")
 # --- G4/G7: full chain — simulate -> snapshot -> board parse ---
 _ORIG_FETCH47 = fi.fetch_json
 
@@ -1497,6 +1514,20 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         check(f"{tag}: #20 top FA {_pos20} shows FP-ROS rank or unpriced",
               bool(re.search(r"\(FP-ROS #\d+\)|\(unpriced\)", _tl20)),
               f"line: {_tl20[:100]}")
+    # #29: YOUR ROSTER prints K and DEF lines (a rostered DEF must never
+    # read as missing), and a DEF never renders as a bare "SF"-style
+    # abbrev — that readout surfaced as "DEF: empty" in chat 2026-10-06.
+    _ros29 = out.split("=== YOUR ROSTER (by value) ===")[1].split("===")[0]
+    _def29 = next((ln for ln in _ros29.splitlines()
+                   if ln.startswith("  DEF: ")), "")
+    _k29 = next((ln for ln in _ros29.splitlines()
+                 if ln.startswith("  K: ")), "")
+    check(f"{tag}: #29 roster prints K and DEF lines",
+          bool(_k29) and bool(_def29),
+          f"K={_k29[:60]!r} DEF={_def29[:60]!r}")
+    check(f"{tag}: #29 DEF line names the unit, never a bare abbrev",
+          not re.search(r"^  DEF: \([A-Z]{2,3}\)", _def29),
+          f"line: {_def29[:80]!r}")
     check(f"{tag}: swaps sorted by delta (ADV-FF-15)",
           "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===" in out)
     check(f"{tag}: trade-lock boundary line (ADV-FF-14)",
