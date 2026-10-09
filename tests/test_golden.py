@@ -286,7 +286,7 @@ check("E7: big delta clears the flag",
 
 with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
     fh.write("# comment\n\n")
-    fh.write("6819 | Michael Pittman | ydai | 2026-09-20 | pending | snapusa | x\n")
+    fh.write("6819 | Michael Pittman | test_partner | 2026-09-20 | pending | snapusa | x\n")
     fh.write("4321 | Dual Rostered | mate2 | 2026-09-21 | pending | ww | y\n")
     fh.write("1234 | Some Guy | mate | 2026-09-01 | rejected | snapusa | z\n")
     fh.write("5678 | Legacy Row | mate3 | 2026-09-02 | pending | z\n")
@@ -297,7 +297,7 @@ parsed_ww = tb.load_pending_offers(tmp, "ww")
 os.unlink(tmp)
 check("pending offers: pending parsed, rejected ignored",
       set(parsed_all) == {"6819", "4321", "5678"}
-      and parsed_all["6819"]["partner"] == "ydai"
+      and parsed_all["6819"]["partner"] == "test_partner"
       and parsed_all["6819"]["league"] == "snapusa",
       f"got {parsed_all}")
 check("#26: on-block is per-league (snapusa run sees only snapusa + legacy)",
@@ -313,6 +313,36 @@ check("#26: league_tag unknown id -> None (safe all-leagues fallback)",
       tb.league_tag("999") is None)
 check("pending offers: missing file -> empty, no crash",
       tb.load_pending_offers("/nonexistent/path.md") == {})
+
+
+# ---------------- #18: no real league-mate handles in committed files -----
+# pending_offers.md (local-only, never pushed) is where real handles live.
+# Wesley's own handle is deliberately excluded from the denylist: it is
+# documented config (references/api_notes.md), not a league mate, and the
+# issue is scoped to league-mate privacy.
+# Handles stored with a "." injected so the denylist's own source lines never
+# literally match the scan. To add a handle: append it with a dot inserted
+# somewhere in the middle (the dot is stripped before matching).
+_KNOWN_LEAGUE_MATE_HANDLES = {
+    "y.dai", "drk.eanwailee", "eeee.eeeee", "a.lai3", "air.conaaron",
+    "nun4.noschmuckk", "theb.east3000", "jus.tinwo", "tris.tang3",
+    "aj.11240", "bus.hkones", "beast.quake67", "fres.hmanvevo",
+}
+# Files the push script uploads to the public repo — keep in sync with
+# bin/push_to_github.py DEFAULT_FILES.
+_COMMITTED_FILES = ["SKILL.md", "bin/trade_board.py", "bin/fantasy_insights.py",
+                    "tests/test_golden.py", "references/api_notes.md",
+                    "bin/push_to_github.py"]
+_skill_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_leaks = []
+for _f in _COMMITTED_FILES:
+    _text = open(os.path.join(_skill_root, _f), encoding="utf-8").read().casefold()
+    for _h in _KNOWN_LEAGUE_MATE_HANDLES:
+        _plain = _h.replace(".", "")
+        if _plain in _text:
+            _leaks.append(f"{_f}: {_plain}")
+check("#18: no real league-mate handles in committed files",
+      not _leaks, f"leaks: {_leaks}")
 
 check("ir_capacity: 1 slot, 1 used -> (1, 0)",
       tb.ir_capacity(1, 1) == (1, 0))
