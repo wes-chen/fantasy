@@ -1517,6 +1517,71 @@ try:
 except Exception as _e:  # noqa: BLE001 - degraded path: SKIP, not advice
     print(f"  SKIP G10 live fetch_week_odds (offline/degraded): {_e}")
 
+# --- FC value-delta snapshots (2026-10-10: the Oct 9 Deebo lesson) ---
+# FantasyCalc reprices intraday on news; the 30-day trend can't see
+# same-day moves, so the board keeps its own per-settings baseline and
+# tags chips that moved >=10% since the last run.
+_TMPD = tempfile.mkdtemp(prefix="fcval_")
+_FC_PATH = os.path.join(_TMPD, "fc_value_snapshots.json")
+_FC_BASE = {f"sid{i}": 1000 + i for i in range(400)}
+check("fc value snapshot: save accepts a healthy pull (>=100 entries)",
+      fi.save_fc_value_snapshot("2qb-14t-1ppr", _FC_BASE, ts=1_000_000.0,
+                                path=_FC_PATH) is True)
+check("fc value snapshot: a realistic-size live pull (~197 entries) "
+      "clears the guard — the threshold must sit below reality",
+      fi.save_fc_value_snapshot("2qb-14t-1ppr",
+                                {f"r{i}": 500 + i for i in range(150)},
+                                path=os.path.join(_TMPD, "real.json")) is True)
+_loaded = fi.load_fc_value_snapshot(_FC_PATH)
+check("fc value snapshot: round-trip preserves settings key + values",
+      _loaded.get("2qb-14t-1ppr", {}).get("values", {}).get("sid0") == 1000
+      and _loaded["2qb-14t-1ppr"]["ts"] == 1_000_000.0)
+check("fc value snapshot: degenerate pull (<100 entries) is refused, "
+      "never clobbers the baseline",
+      fi.save_fc_value_snapshot("2qb-14t-1ppr",
+                                {"a": 1, "b": 2}, path=_FC_PATH) is False
+      and fi.load_fc_value_snapshot(_FC_PATH)
+      ["2qb-14t-1ppr"]["values"]["sid0"] == 1000)
+_DNOW = dict(_FC_BASE, sid1=1150, sid2=850, sid3=1099, sid4=500)  # +15/-15/+9.9
+_DNOW["newguy"] = 900  # absent from the baseline -> skipped
+_D = fi.fc_value_deltas("2qb-14t-1ppr", _DNOW, path=_FC_PATH,
+                        now=1_000_000.0 + 3600)
+_exp1 = round((1150 - _FC_BASE["sid1"]) / _FC_BASE["sid1"], 3)
+_exp2 = round((850 - _FC_BASE["sid2"]) / _FC_BASE["sid2"], 3)
+check("fc value deltas: >=10% moves flagged both directions, <10% and "
+      "baseline-absent sids ignored",
+      _D.get("sid1") == _exp1 and _D.get("sid2") == _exp2
+      and "sid3" not in _D and "newguy" not in _D,
+      f"got {_D} (expected sid1={_exp1}, sid2={_exp2})")
+_STALE_PATH = os.path.join(_TMPD, "stale.json")
+fi.save_fc_value_snapshot("2qb-14t-1ppr", _FC_BASE, ts=1_000_000.0,
+                          path=_STALE_PATH)
+check("fc value deltas: snapshot older than 7 days is not an honest "
+      "baseline -> no flags",
+      fi.fc_value_deltas("2qb-14t-1ppr", _DNOW, path=_STALE_PATH,
+                         now=1_000_000.0 + 8 * 86400) == {})
+check("fc value deltas: missing file -> {} (fail-silent, no tags this run)",
+      fi.fc_value_deltas("2qb-14t-1ppr", _DNOW,
+                         path=os.path.join(_TMPD, "nope.json")) == {})
+check("fc value deltas: corrupt file -> {} (never crashes)",
+      (open(os.path.join(_TMPD, "bad.json"), "w").write("{oops"),
+       fi.fc_value_deltas("2qb-14t-1ppr", _DNOW,
+                          path=os.path.join(_TMPD, "bad.json")))[1] == {})
+check("fc value deltas: unknown settings key -> {} (leagues never "
+      "cross-contaminate)",
+      fi.fc_value_deltas("1qb-4t-0.5ppr", _DNOW, path=_FC_PATH,
+                         now=1_000_000.0 + 3600) == {})
+check("price_delta_tag: negative/positive/empty render exactly",
+      tb.price_delta_tag(-0.107) == " [PRICE -11% vs last board]"
+      and tb.price_delta_tag(0.143) == " [PRICE +14% vs last board]"
+      and tb.price_delta_tag(None) == ""
+      and tb.price_delta_tag(0.0) == "",
+      f"got {tb.price_delta_tag(-0.107)!r}, {tb.price_delta_tag(0.143)!r}")
+check("price_delta_tag: boundary — exactly 10% renders (the delta engine "
+      "flags >= 10%, sub-10% never is)",
+      tb.price_delta_tag(0.10) == " [PRICE +10% vs last board]"
+      and tb.price_delta_tag(0.099) == " [PRICE +10% vs last board]")
+
 # ---------------- integration ----------------
 print("== integration ==")
 
