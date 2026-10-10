@@ -497,6 +497,94 @@ NFL_TEAMS = frozenset(
     "LAR MIA MIN NE NO NYG NYJ PHI PIT SF SEA TB TEN WAS".split())
 
 
+# ---------------------------------------------------------------- FC value-delta snapshots
+# (2026-10-10: the Oct 9 Deebo lesson). FantasyCalc reprices redraft values
+# intraday on news — Kamara's value cratered between the 8:19am board and
+# the afternoon reprice, flipping a swap row's fairness read from EXCELLENT
+# (~1% light) to FAIR (~11% light). The 30-day trend (E7) can't see
+# same-day moves, so the board keeps its own per-settings value snapshot
+# and flags any chip in a swap row whose value moved materially since the
+# previous board run. Timestamped, fail-silent, local-only.
+FC_VALUE_SNAP_PATH = os.path.join(GOAL_DIR, "hidden_files",
+                                  "fc_value_snapshots.json")
+FC_VALUE_MIN_ENTRIES = 100   # save guard: refuse a degenerate FC pull.
+# (Live FC redraft pulls run ~197 entries for 2QB/14-team/1.0 PPR, so
+# this sits well below a healthy pull and far above a failed one.)
+FC_DELTA_FRAC = 0.10         # |relative move| >= 10% gets a PRICE tag
+FC_SNAP_MAX_AGE = 7 * 86400  # older baselines are stale; tag nothing
+
+
+def load_fc_value_snapshot(path=FC_VALUE_SNAP_PATH):
+    """{settings_key: {"ts": float, "values": {sid: value}}}; {} when the
+    file is missing or corrupt (never crashes — a missing baseline just
+    means no PRICE tags this run)."""
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for key, snap in data.items():
+        if (isinstance(snap, dict) and isinstance(snap.get("values"), dict)
+                and isinstance(snap.get("ts"), (int, float))):
+            out[key] = snap
+    return out
+
+
+def save_fc_value_snapshot(settings_key, fval, ts=None, path=FC_VALUE_SNAP_PATH):
+    """Record this run's {sid: value} as the baseline for the next run's
+    delta flags. Refuses to save a degenerate pull (fewer than
+    FC_VALUE_MIN_ENTRIES entries) so a failed FC fetch can never clobber
+    the baseline with garbage. Returns True when saved."""
+    values = {str(sid): v for sid, v in (fval or {}).items()
+              if v and float(v) > 0}
+    if len(values) < FC_VALUE_MIN_ENTRIES:
+        return False
+    snaps = load_fc_value_snapshot(path)
+    snaps[settings_key] = {"ts": ts if ts is not None else time.time(),
+                           "values": values}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(snaps, fh)
+    os.replace(tmp, path)
+    return True
+
+
+def fc_value_deltas(settings_key, fval, path=FC_VALUE_SNAP_PATH, now=None):
+    """{sid: relative delta} for players whose FantasyCalc value moved by
+    >= FC_DELTA_FRAC since the previous board run's snapshot.
+
+    The baseline must exist, be for this settings key, and be no older
+    than FC_SNAP_MAX_AGE — otherwise {} (no honest baseline, no flags).
+    fval is {sid: value}; sids absent from either side are skipped.
+    delta = (new - old) / old, signed.
+    """
+    snaps = load_fc_value_snapshot(path)
+    snap = snaps.get(settings_key)
+    if not snap:
+        return {}
+    now = time.time() if now is None else now
+    if now - float(snap["ts"]) > FC_SNAP_MAX_AGE:
+        return {}
+    old = snap["values"]
+    out = {}
+    for sid, new_v in (fval or {}).items():
+        sid = str(sid)
+        old_v = old.get(sid)
+        if not old_v or not new_v:
+            continue
+        try:
+            d = (float(new_v) - float(old_v)) / float(old_v)
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+        if abs(d) >= FC_DELTA_FRAC:
+            out[sid] = round(d, 3)
+    return out
+
+
 # ---------------------------------------------------------------- G4 playoff-odds Monte Carlo
 
 def simulate_playoffs(records, schedule, playoff_teams, sims=2000, seed=7,
