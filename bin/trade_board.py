@@ -85,6 +85,18 @@ def fairness_gap(mine_total, theirs_total):
     band label meant two different things on one page.)"""
     return abs(mine_total - theirs_total) / max(mine_total, theirs_total, 1)
 
+
+def price_delta_tag(delta):
+    """Row marker for a chip whose FantasyCalc value moved materially
+    since the previous board run (the Oct 9 Deebo lesson: Kamara's value
+    cratered between the morning board and the afternoon reprice, and
+    the 30-day trend couldn't see it). Returns "" when there is no
+    material move — rows print exactly as before."""
+    if not delta:
+        return ""
+    sign = "+" if delta > 0 else ""
+    return f" [PRICE {sign}{delta:.0%} vs last board]"
+
 def wire_richness(num_teams):
     """Wire talent density: small-league wires are rich (replacement level
     is high, a better target almost always emerges); 14-team wires are a
@@ -629,6 +641,17 @@ def main():
                          e.get("overallRank") or 999, e.get("trend30Day") or 0,
                          bool(e.get("displayTrend")))
 
+    # FC value-delta vs the previous board run (2026-10-10: the Oct 9
+    # Deebo lesson — FC reprices intraday on news, and the 30-day trend
+    # can't see same-day moves). The baseline is keyed by FC settings so
+    # the two leagues never cross-contaminate; it is saved AFTER the
+    # delta read so this run becomes the next baseline. A degenerate
+    # pull is refused by the save guard, never clobbering the baseline.
+    _fc_settings_key = f"{num_qbs}qb-{num_teams}t-{ppr:g}ppr"
+    _fc_now = {str(sid): v[0] for sid, v in fval.items()}
+    _fc_deltas = fi.fc_value_deltas(_fc_settings_key, _fc_now)
+    fi.save_fc_value_snapshot(_fc_settings_key, _fc_now)
+
     # --- season clock: current NFL week + trade deadline -> posture ---
     try:
         nfl_week = int((get(f"{SLEEPER}/state/nfl") or {}).get("week") or 1)
@@ -935,6 +958,11 @@ def main():
         stack = (" [BYE-STACK W%d]" % b) if my_bye_counts.get(b, 0) >= 2 else ""
         return f"[bye {b}]{stack}"
 
+    def _vtag(x):
+        # 2026-10-10: chip's FantasyCalc value moved >=10% since the
+        # previous board run — the fairness gap on this row may be stale
+        return price_delta_tag(_fc_deltas.get(str(x["id"])))
+
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
         # #19: fairness gap on RAW market values (same basis as the
         # 2-for-1 section) — the bands are one calibrated language.
@@ -953,9 +981,9 @@ def main():
         lsig = low_signal_lateral(fdisplay(mine["id"]),
                                   fdisplay(theirs["id"]), delta,
                                   mine["val"], theirs["val"])
-        return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}"
+        return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}{_vtag(mine)}"
                        f" -> {partner}; "
-                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)} "
+                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)} "
                        f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}|"
                        f"{fairness_band(gap)}]{thin}{tag}{lsig}")
 
@@ -1164,6 +1192,9 @@ def main():
     print("  value ranges: (point, lo-hi) from 30-day trend volatility "
           "(+/- half the 30d drift); [LOW-SIGNAL LATERAL] = both 30-day "
           "trends flat (FC displayTrend) with a small lineup delta")
+    print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since the "
+          "previous board run (intraday repricing on news) — the fairness "
+          "gap on that row may be stale; re-check before sending")
     if pw_active:
         print("  G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)")
     my_need = need_score(me)
@@ -1252,6 +1283,9 @@ def main():
         print("  two surplus pieces -> one elite; ranked by lineup-points "
               "delta per freed roster slot (freed slot refills from the "
               "wire); both pieces must be a position they need")
+        print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since "
+              "the previous board run — the fairness gap on that row may be "
+              "stale; re-check before sending")
 
         def swap_delta_2for1(mine_a, mine_b, theirs):
             """Lineup-points delta of sending two players for one.
@@ -1298,9 +1332,9 @@ def main():
             tlo, thi = value_range(theirs["val"], ftrend(theirs["id"]))
             return (delta,
                     f"  you send {a['name']} ({a['val']}, {alo}-{ahi}) + "
-                    f"{b['name']} ({b['val']}, {blo}-{bhi}){_btag(a)}{_btag(b)} -> "
+                    f"{b['name']} ({b['val']}, {blo}-{bhi}){_btag(a)}{_vtag(a)}{_btag(b)}{_vtag(b)} -> "
                     f"{partner}; you get {theirs['name']} "
-                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)} "
+                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)} "
                     f"[lineup {delta:+.0f}{fit}][gap vs combined "
                     f"{gap:.0%}|{fairness_band(gap)}][frees 1 slot]{tag}")
 
