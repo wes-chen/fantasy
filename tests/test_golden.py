@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import date
 
 SKILL = os.path.expanduser("~/workspace/skills/fantasy-trade-analyst")
 sys.path.insert(0, os.path.join(SKILL, "bin"))
@@ -1025,6 +1026,114 @@ check("G5: clamp boundary: toughest possible slate = 0.90 exactly",
 check("G5: playoff-bye override is 0.85 by design (not the 0.9-1.1 clamp)",
       _PB[("bye back", "KC", "RB")] == (0.85, "[PLAYOFF BYE W16]")
       and fi.G5_BYE_MULT == 0.85)
+
+# --- E12 endgame: wide playoff-ceiling band + trade-lock countdown ---
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2026,REG,15,AAA,D1\n2026,REG,16,AAA,D1\n2026,REG,17,AAA,D1\n"
+              "2026,REG,15,BBB,D2\n2026,REG,16,BBB,D2\n2026,REG,17,BBB,D2\n")
+    _GCLW = _fh.name
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season_type,position,opponent_team,game_id,"
+              "rushing_yards,rushing_tds\n"
+              "REG,RB,D1,g1,200,2\nREG,RB,D2,g2,10,0\n")
+    _SCLW = _fh.name
+_PCLW = fi.playoff_multipliers(
+    _GCLW, _SCLW,
+    {("softest", "AAA", "RB"): ("AAA", "RB"),
+     ("toughest", "BBB", "RB"): ("BBB", "RB")},
+    (15, 16, 17), wide=True)
+os.unlink(_GCLW)
+os.unlink(_SCLW)
+check("E12: wide band: softest possible slate = 1.30 exactly",
+      _PCLW[("softest", "AAA", "RB")][0] == 1.30,
+      f"got {_PCLW[('softest', 'AAA', 'RB')]}")
+check("E12: wide band: toughest possible slate = 0.70 exactly",
+      _PCLW[("toughest", "BBB", "RB")][0] == 0.70,
+      f"got {_PCLW[('toughest', 'BBB', 'RB')]}")
+check("E12: wide band: tags use the widened thresholds",
+      _PCLW[("softest", "AAA", "RB")][1] == "[P+ soft]"
+      and _PCLW[("toughest", "BBB", "RB")][1] == "[P- brutal]",
+      f"got {_PCLW[('softest', 'AAA', 'RB')]}, "
+      f"{_PCLW[('toughest', 'BBB', 'RB')]}")
+check("E12: wide band: default unaffected",
+      fi.G5_WIDE_MIN_MULT == 0.70 and fi.G5_WIDE_MAX_MULT == 1.30)
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    # wide=True on a bye schedule: override is schedule-driven, not
+    # band-driven.
+    _fh.write("season,game_type,week,away_team,home_team\n"
+              "2026,REG,15,KC,DEN\n2026,REG,17,KC,TEN\n"
+              "2026,REG,16,DEN,JAX\n2026,REG,16,BUF,NE\n")
+    _GBW = _fh.name
+_PBW = fi.playoff_multipliers(
+    _GBW, _GBW, {("bye back", "KC", "RB"): ("KC", "RB")}, (15, 16, 17),
+    wide=True)
+os.unlink(_GBW)
+check("E12: wide band: playoff-bye override still 0.85 (not the wide clamp)",
+      _PBW[("bye back", "KC", "RB")] == (0.85, "[PLAYOFF BYE W16]"),
+      f"got {_PBW[('bye back', 'KC', 'RB')]}")
+check("E12: default band unchanged when wide is not passed",
+      all(0.90 <= v[0] <= 1.10 for v in _PCL.values()))
+
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team,gameday\n"
+              "2026,REG,11,KC,DEN,2026-11-19\n"
+              "2026,REG,11,BUF,NE,2026-11-23\n"
+              "2026,REG,12,DEN,KC,2026-11-25\n"
+              "2026,REG,12,NE,BUF,2026-11-30\n")
+    _GL = _fh.name
+check("E12: countdown reads the lock off the schedule "
+      "(first gameday of Week 12)",
+      fi.trade_lock_countdown(_GL, 11, today=date(2026, 10, 12))
+      == (44, "2026-11-25", False),
+      f"got {fi.trade_lock_countdown(_GL, 11, today=date(2026, 10, 12))}")
+check("E12: countdown clamps at 0 once the lock has passed",
+      fi.trade_lock_countdown(_GL, 11, today=date(2026, 11, 26))
+      == (0, "2026-11-25", False))
+with tempfile.NamedTemporaryFile("w", suffix=".csv",
+                                 delete=False) as _fh:
+    _fh.write("season,game_type,week,away_team,home_team,gameday\n"
+              "2026,REG,11,KC,DEN,2026-11-19\n"
+              "2026,REG,11,BUF,NE,2026-11-23\n")
+    _GLA = _fh.name
+check("E12: countdown degrades to approx when Week N+1 has no rows",
+      fi.trade_lock_countdown(_GLA, 11, today=date(2026, 10, 12))
+      == (44, "2026-11-25", True))
+os.unlink(_GLA)
+check("E12: countdown refuses a fake when the schedule is empty",
+      fi.trade_lock_countdown(_GL, 14, today=date(2026, 10, 12))
+      == (None, None, True)
+      and fi.trade_lock_countdown(None, 11) == (None, None, True))
+os.unlink(_GL)
+
+with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as _fh:
+    _fh.write("## snapusa (playoffs W15, 6 teams)\n"
+              "Wesley playoff probability: 78% — CONTENDER — win-now: pay up "
+              "for certainty\n"
+              "| weslchen | 4-2 | 118.3 | 78% | 9.1 | <-- YOU\n"
+              "## weekend warriors (playoffs W16, 4 teams)\n"
+              "Wesley playoff probability: 99% — CONTENDER — win-now: pay up "
+              "for certainty\n")
+    _PO = _fh.name
+check("E12: playoff-posture parser reads prob + posture from the snapshot",
+      tb.wesley_playoff_posture("snapusa", path=_PO)
+      == (78, "CONTENDER — win-now: pay up for certainty"),
+      f"got {tb.wesley_playoff_posture('snapusa', path=_PO)}")
+check("E12: posture parser is per-league",
+      tb.wesley_playoff_posture("weekend warriors", path=_PO)[0] == 99)
+check("E12: posture parser returns Nones for an unlisted league",
+      tb.wesley_playoff_posture("nope league", path=_PO) == (None, None))
+os.utime(_PO, (time.time() - 80 * 3600,) * 2)
+try:
+    tb.wesley_playoff_posture("snapusa", path=_PO)
+    check("E12: posture parser refuses a stale (>72h) snapshot", False)
+except FileNotFoundError:
+    check("E12: posture parser refuses a stale (>72h) snapshot", True)
+os.unlink(_PO)
 
 # G5 gating: Week-5 season-clock gate (the comment at trade_board.py ~400)
 check("G5: gate off before Week 5 (weights must not move early deals)",
