@@ -87,7 +87,13 @@ offers and marks those players `[ON-BLOCK: ...]` in the roster — on-block
 is per-league (gh #26): an open snapusa offer never blocks the same player
 on the weekend-warriors board, and vice versa.
 The header also prints the season clock: current NFL week, weeks to the
-trade deadline, and the posture below.
+trade deadline, and the posture below. From Week 8, E12 endgame mode gates
+in: snapusa gets a days-to-trade-lock countdown (read off the nflverse
+schedule — the first gameday of the lock week, marked as an estimate) plus
+the playoff-probability posture from the G4 snapshot (CONTENDER / BUBBLE /
+LONGSHOT); the 4-team league (everyone makes playoffs) shifts its
+swap/2-for-1 deltas to playoff-week-ceiling ranking by widening the G5
+playoff-SOS band from x0.9-1.1 to x0.7-1.3.
 
 The new analytics live in `bin/fantasy_insights.py` (pure, tested
 functions + fetch helpers; `bin/trade_board.py` imports it). Two weekly
