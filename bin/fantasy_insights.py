@@ -40,6 +40,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from datetime import date, timedelta
 
 SLEEPER = "https://api.sleeper.app/v1"
 ESPN_CORE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
@@ -761,9 +762,11 @@ def defensive_strength(stats_gz):
 # dominates talent (a soft playoff slate is a nudge, not a verdict).
 G5_MIN_MULT, G5_MAX_MULT = 0.90, 1.10
 G5_BYE_MULT = 0.85  # a bye during YOUR playoff weeks: scores a zero
+G5_WIDE_MIN_MULT, G5_WIDE_MAX_MULT = 0.70, 1.30  # E12 endgame ceiling mode
 
 
-def playoff_multipliers(games_gz, stats_gz, player_teams, playoff_weeks):
+def playoff_multipliers(games_gz, stats_gz, player_teams, playoff_weeks,
+                        wide=False):
     """{nkey -> (mult, tag)} weighting trade values by Weeks 15-17 slate.
 
     player_teams: {nkey: (team, pos)}. mult in [0.9, 1.1]: 1.1 = softest
@@ -771,6 +774,13 @@ def playoff_multipliers(games_gz, stats_gz, player_teams, playoff_weeks):
     week forces 0.85 and a [PLAYOFF BYE] tag. When a playoff week has no
     schedule rows the SOS is unsupported — every player gets a marked
     neutral (never a phantom bye, never a silent 1.0).
+
+    wide=True (E12 endgame: small leagues where everyone makes playoffs,
+    from Week 8): widen the band to [0.7, 1.3] and triple the softness
+    coefficient so the playoff slate dominates the value read — a
+    playoff-week ceiling ranking instead of a balanced one. Tag
+    thresholds widen with the band ([P+ soft] at >=1.10, [P- brutal] at
+    <=0.90); the 0.85 playoff-bye override is unchanged.
     """
     opps, missing = load_playoff_opponents(games_gz, playoff_weeks)
     out = {}
@@ -806,11 +816,58 @@ def playoff_multipliers(games_gz, stats_gz, player_teams, playoff_weeks):
         # average defensive softness: pct (0 = toughest, 1 = softest)
         soft = sum(pct.get((o, pos), 0.5) for _, o in weeks)
         soft /= max(len(weeks), 1)
-        mult = min(G5_MAX_MULT, max(G5_MIN_MULT, 1.0 + 0.2 * (soft - 0.5)))
-        tag = "[P+ soft]" if mult >= 1.05 else ("[P- brutal]"
-                                                if mult <= 0.95 else "")
+        if wide:
+            _lo, _hi, _coef = G5_WIDE_MIN_MULT, G5_WIDE_MAX_MULT, 0.6
+            _pt, _nt = 1.10, 0.90
+        else:
+            _lo, _hi, _coef = G5_MIN_MULT, G5_MAX_MULT, 0.2
+            _pt, _nt = 1.05, 0.95
+        mult = min(_hi, max(_lo, 1.0 + _coef * (soft - 0.5)))
+        tag = "[P+ soft]" if mult >= _pt else ("[P- brutal]"
+                                              if mult <= _nt else "")
         out[nkey] = (round(mult, 3), tag)
     return out
+
+
+def trade_lock_countdown(games_gz, trade_dl_week, today=None, season="2026"):
+    """Days until the trade lock, read off the nflverse schedule (E12).
+
+    Sleeper trade_deadline=N means trades are legal through NFL Week N;
+    the lock takes effect when the state week rolls to N+1, estimated here
+    as the first scheduled gameday of Week N+1. Returns (days_left:int,
+    lock_date:"YYYY-MM-DD", approx:bool) — approx when no Week-(N+1) rows
+    exist (falls back to the last gameday of Week N + 2 days). (None,
+    None, True) when the schedule has nothing usable: the caller prints
+    the degraded path, never a fake countdown. days_left clamps at 0.
+    """
+    today = today or date.today()
+    opener = gzip.open if str(games_gz or "").endswith(".gz") else open
+    lock_days, dl_days = [], []
+    try:
+        with opener(games_gz, "rt") as fh:
+            for r in csv.DictReader(fh):
+                if (not _reg_game_row(r)
+                        or str(r.get("season") or "") != season
+                        or not r.get("gameday")):
+                    continue
+                try:
+                    wk = int(r.get("week") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if wk == trade_dl_week + 1:
+                    lock_days.append(r["gameday"])
+                elif wk == trade_dl_week:
+                    dl_days.append(r["gameday"])
+    except Exception:  # noqa: BLE001 - no schedule, no countdown
+        return None, None, True
+    if lock_days:
+        lock, approx = min(lock_days), False
+    elif dl_days:
+        lock, approx = (str(date.fromisoformat(max(dl_days))
+                            + timedelta(days=2)), True)
+    else:
+        return None, None, True
+    return max((date.fromisoformat(lock) - today).days, 0), lock, approx
 
 
 # ---------------------------------------------------------------- G6 handcuff leverage map
