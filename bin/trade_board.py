@@ -476,6 +476,29 @@ def playoff_snapshot_lines(league_name, path=None):
     if not _shown:
         lines.append("  (snapshot has no section for this league yet)")
     return lines
+
+
+def wesley_playoff_posture(league_name, path=None):
+    """(E12) (prob_pct:int|None, posture:str|None) for Wesley from the G4
+    playoff-odds.md snapshot the Tuesday job writes. Raises
+    FileNotFoundError when the snapshot is missing or stale (>72h) — the
+    board catches it and degrades to the weeks-left countdown alone.
+    Posture comes from fi.posture_for: CONTENDER / BUBBLE / LONGSHOT."""
+    path = path or os.path.join(fi.GOAL_DIR, "hidden_files",
+                                "playoff-odds.md")
+    if (time.time() - os.stat(path).st_mtime) / 3600 > 72:
+        raise FileNotFoundError("stale snapshot")
+    in_league = False
+    for ln in open(path).read().splitlines():
+        if ln.startswith("## "):
+            in_league = (league_name in ln)
+            continue
+        if in_league and "Wesley playoff probability" in ln:
+            m = re.search(r"(\d+)%\s*[—–-]\s*(.+)$", ln)
+            if m:
+                return int(m.group(1)), m.group(2).strip()
+            return None, None
+    return None, None
 def get(url):
     req = urllib.request.Request(url, headers={"User-Agent": "trade-board/1.0"})
     return json.load(urllib.request.urlopen(req, timeout=30))
@@ -700,16 +723,23 @@ def main():
     # is unavailable in every free source — target share + air-yards
     # share + snap% are the route proxies, never synthesized.
     nfl_usage, pweight, nfl_depth, nfl_err, nvp = {}, {}, {}, None, {}
+    _wide = False  # E12: widened below only when the nflverse fetch lands
     try:
         nvp = fi.nflverse_paths(keys=("stats", "snaps", "games", "depth"))
         nfl_usage = fi.load_usage(nvp["stats"], nvp["snaps"])
         _pstart = (league.get("settings") or {}).get("playoff_week_start") or 15
         _pteams = {k: (v["team"], v["pos"]) for k, v in nfl_usage.items()}
+        # E12 endgame (from Week 8): the small league sends everyone to the
+        # playoffs, so its rankings shift to playoff-week ceiling — the
+        # playoff-SOS band widens from x0.9-1.1 to x0.7-1.3. The 14-team
+        # board keeps the balanced band (regular season still matters).
+        _wide = (nfl_week >= 8 and num_teams <= 6)
         pweight = fi.playoff_multipliers(nvp["games"], nvp["stats"], _pteams,
-                                         tuple(range(_pstart, 19)))
+                                         tuple(range(_pstart, 19)), wide=_wide)
         nfl_depth = fi.parse_depth_charts(nvp["depth"])
     except Exception as e:  # noqa: BLE001 - degraded paths below
         nfl_err = str(e)[:140]
+    _g5_range = "x0.7-1.3" if _wide else "x0.9-1.1"
 
     nkey_to_sid = {}  # (norm name, team, pos) -> sleeper id
     for _sid, _p in players.items():
@@ -833,6 +863,38 @@ def main():
     print(f"Trade lock: trades legal through NFL Week {trade_dl} "
           f"(lock = start of Week {trade_dl + 1}); "
           f"trade review: {trade_review_days} day(s)")
+    # E12 endgame mode (from Week 8): the stretch run changes the job.
+    # snapusa: days-to-lock countdown + playoff-probability posture off the
+    # G4 snapshot. The small league: everyone makes the playoffs, so the
+    # only question is the playoff-week ceiling (wide band below).
+    if 8 <= nfl_week <= trade_dl:
+        if num_teams <= 6:
+            _eg_pstart = (league.get("settings") or {}).get(
+                "playoff_week_start") or 15
+            print(f"ENDGAME (E12): everyone makes playoffs — swap/2-for-1 "
+                  f"deltas rank by Weeks {_eg_pstart}-18 playoff ceiling "
+                  f"(playoff-SOS band widened to x0.7-1.3)")
+        else:
+            _eg_parts = []
+            try:
+                _prob, _post = wesley_playoff_posture(league.get("name", ""))
+                if _prob is not None:
+                    _eg_parts.append(
+                        "playoff {}% — {}".format(
+                            _prob, (_post or "").split("—")[0].strip()))
+            except Exception:  # noqa: BLE001 - degraded, never fatal
+                pass
+            try:
+                _days, _lock, _approx = fi.trade_lock_countdown(
+                    nvp.get("games"), trade_dl)
+                if _days is not None:
+                    _eg_parts.append(
+                        f"{_days}d to trade lock (est {_lock}"
+                        f"{', approx' if _approx else ''})")
+            except Exception:  # noqa: BLE001 - degraded, never fatal
+                pass
+            if _eg_parts:
+                print("ENDGAME (E12): " + " | ".join(_eg_parts))
     if nfl_week == trade_dl and trade_review_days:
         print(f"DEADLINE WEEK: deals must be ACCEPTED {trade_review_days}+ "
               f"day(s) before the Week {trade_dl + 1} lock to clear review")
@@ -1044,7 +1106,8 @@ def main():
     print("=== YOUR ROSTER (by value) ===")
     if pw_active:
         print("  [P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal — "
-              "swap deltas below use playoff-weighted values (x0.9-1.1)")
+              f"swap deltas below use playoff-weighted values ({_g5_range}"
+              + (", E12 endgame ceiling mode" if _wide else "") + ")")
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
@@ -1196,7 +1259,9 @@ def main():
           "previous board run (intraday repricing on news) — the fairness "
           "gap on that row may be stale; re-check before sending")
     if pw_active:
-        print("  G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)")
+        print(f"  G5: deltas use playoff-weighted values "
+              f"(W15-17 SOS {_g5_range}"
+              + (", E12 endgame ceiling mode" if _wide else "") + ")")
     my_need = need_score(me)
     _all_tradable = tradable(me)
     my_tradable = [(x, f) for x, f in _all_tradable if x["id"] not in onblock]
@@ -1207,7 +1272,8 @@ def main():
         (ADV-FF-10 static status multiplier + E5 season-timing bracket for
         Out/IR/Doubtful, from this run's NFL week — injured-player values
         visibly decay as the season progresses) and the G5
-        playoff-schedule weight (x0.9-1.1 from Week 5)."""
+        playoff-schedule weight (x0.9-1.1 from Week 5; x0.7-1.3 on the
+        small league from Week 8, E12 endgame ceiling mode)."""
         st = (players.get(str(x["id"]), {}) or {}).get("injury_status") or ""
         return x["val"] * injury_discount(st, nfl_week) * pw_of(x["id"])
 
