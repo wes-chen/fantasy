@@ -306,6 +306,23 @@ def legal_drops(bench, reserve_ids, drop_needed):
     return list(bench)
 
 
+def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids):
+    """DROP pool for waiver ADD/DROP suggestions (G8 unification).
+
+    legal_drops() answers only "is the drop legal" (E14 slot math). The
+    suggestion engine must ALSO not name a G8-protected player as the
+    drop: a handcuff, a backup whose starter is hurt (he'd start), a
+    rising-usage player, or a player with an open offer on him — the
+    G8 clog audit prints that same player as protected. Before this
+    helper the two sections disagreed: suggested moves could drop a
+    protected player the audit listed as protected two lines below.
+    protected_ids: Sleeper player ids (str) in the G8 protection sets.
+    """
+    pool = legal_drops(bench, reserve_ids, drop_needed)
+    prot = {str(x) for x in (protected_ids or [])}
+    return [b for b in pool if str(b.get("id")) not in prot]
+
+
 def ir_capacity(reserve_slots, reserve_count):
     """IR-slot accounting (E13): returns (slots, open).
 
@@ -1595,7 +1612,28 @@ def main():
     # IR/reserve occupant frees no active bench slot.
     _my = next((r for r in rosters if r.get("owner_id") == a.me), None)
     _sm = slot_math(_my, rp, ir_slots)
-    _drop_pool = legal_drops(bench, _sm["reserve_ids"], _sm["drop_needed"])
+    # G8 unification: the waiver suggestion engine must not name as a
+    # DROP the same players the G8 clog audit protects (handcuff /
+    # hurt-starter backup / rising usage / on-block). The audit
+    # recomputes these sets for display below; this is the same
+    # membership, applied to the drop pool before suggestions emit.
+    # K/DEF keep their own pool (G6 is RB-only, G1 never flags K/DEF).
+    try:
+        _prot = {b["sid"] for h in hm_cache for b in h["backups"]
+                 if b.get("status") == "mine" and b.get("sid")}
+        for _b in bench:
+            for _s in my_lineup:
+                if (_s["pos"] == _b["pos"] and _s["val"] > _b["val"]
+                        and ((players.get(_s["id"], {}) or {})
+                             .get("injury_status") or "") in HURT):
+                    _prot.add(str(_b["id"]))
+                    break
+        _prot |= {str(s) for s in buy_low_sids}
+        _prot |= {str(s) for s in onblock}
+    except Exception:  # noqa: BLE001 — degrade to the old legal-only pool
+        _prot = set()
+    _drop_pool = waiver_drop_pool(bench, _sm["reserve_ids"],
+                                  _sm["drop_needed"], _prot)
 
     sug = []
     for pos in WPOS:
