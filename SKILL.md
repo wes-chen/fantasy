@@ -81,7 +81,9 @@ drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
-named as drops)).
+named as drops; the suggested ADD/DROP pairs draw their DROP from the
+same protected pool, so the two sections never disagree on who is
+droppable)).
 A `=== PENDING OFFERS ===` section (ADV-FF-07) prints Wesley's own open
 offers and marks those players `[ON-BLOCK: ...]` in the roster — on-block
 is per-league (gh #26): an open snapusa offer never blocks the same player
