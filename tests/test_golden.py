@@ -459,6 +459,30 @@ check("legal_drops: FULL roster, nothing in reserve -> unchanged",
 check("legal_drops: FULL roster, all bench in reserve -> no legal drop",
       tb.legal_drops([_bench[0]], ["8205"], drop_needed=True) == [])
 
+# G8 unification: waiver suggestions must not name a G8-protected
+# player as the DROP (handcuff / ahead-out / rising / on-block) —
+# the suggested-moves section used to disagree with the G8 audit
+# printed two lines below it.
+check("waiver_drop_pool: protected ids excluded, rest kept in order",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _bench, [], drop_needed=False, protected_ids={"9221"})]
+      == ["Isiah Pacheco", "Michael Pittman"])
+check("waiver_drop_pool: FULL roster still excludes reserve occupants",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _bench, ["8205"], drop_needed=True, protected_ids={"6819"})]
+      == ["Jahmyr Gibbs"])
+check("waiver_drop_pool: int protected id matches str bench id",
+      tb.waiver_drop_pool(_bench, [], drop_needed=False,
+                          protected_ids={9221})[0]["name"]
+      != "Jahmyr Gibbs")
+check("waiver_drop_pool: empty/None protected -> same as legal_drops",
+      tb.waiver_drop_pool(_bench, ["8205"], drop_needed=True,
+                          protected_ids=None)
+      == tb.legal_drops(_bench, ["8205"], drop_needed=True))
+check("waiver_drop_pool: all protected -> no suggestion drop",
+      tb.waiver_drop_pool(_bench, [], drop_needed=False,
+                          protected_ids={"8205", "9221", "6819"}) == [])
+
 # ---------------- NF-01: waiver priority cost model ----------------
 _fake_rosters = [
     {"owner_id": "aaa", "roster_id": 1,
@@ -1763,6 +1787,21 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         check(f"{tag}: header stable: {hdr[:30]}...", hdr in out)
     check(f"{tag}: hold-vs-spend line present",
           "hold-vs-spend" in out and "P(better target emerges" in out)
+    # G8 unification: no suggested-move DROP may carry a G8 protection
+    # tag ([handcuff]/[ahead-out]/[rising]) in the clog-audit ranking
+    # below it — the two sections must agree on who is droppable.
+    # (Vacuous when the board emits no suggested moves this run.)
+    _sug_drops = {m.group(1) for m in re.finditer(
+        r"^  ADD .+ / DROP (.+?) \(", out, re.M)}
+    _g8_sec = out.split("roster-clog audit")[1].split(
+        "=== WAIVER PRIORITY COST ===")[0] if "roster-clog audit" in out \
+        else ""
+    _protected_names = {m.group(1) for m in re.finditer(
+        r"^\s{4}(.+?) \([A-Z]+,[0-9.]+ -> contingent [0-9.]+\)"
+        r".*\[(handcuff|ahead-out|rising)\]", _g8_sec, re.M)}
+    check(f"{tag}: suggested DROP never G8-protected",
+          not (_sug_drops & _protected_names),
+          f"overlap={_sug_drops & _protected_names}")
     # #22: YOUR ROSTER must carry the same bye-stack warnings the audit
     # flags — every week with 2+ of his players on bye gets a
     # [BYE-STACK W..] tag on each of those roster lines. (Previously the
