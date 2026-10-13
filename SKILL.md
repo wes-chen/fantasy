@@ -61,7 +61,11 @@ there), hole-creating options it refuses to price
 on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
 and who holds him: mine/free/opponent), an IR-slot audit (E13 — used/open
 IR capacity from Sleeper's reserve_slots with a full-IR warning, since the
-next injury then costs an active roster spot), and a waiver-wire section (top
+next injury then costs an active roster spot), an IR stash hunt (E15 —
+wire scan for IR/Out free agents with meaningful FantasyCalc value,
+gated on an open IR slot; the deliberate exception to the injury veto —
+added precisely because they're injured, to stash in IR; 14-team only,
+suppressed in the 4-team league and after the trade deadline), and a waiver-wire section (top
 free agents by position on FantasyCalc redraft value — K/DEF carry no FC
 value, so the top FA K/DEF lines print their FantasyPros ROS rank instead
 and the suggestion engine streams only decisive upgrades: a top-12 ROS
@@ -187,6 +191,9 @@ be redundant):
      them from suggestions). Questionable is fine, named with the tag.
      Values go stale on injury news — a high number next to an injury
      flag is a trap, not a find.
+     Exception (E15): the IR stash hunt deliberately adds IR/Out players
+     — precisely because they're injured — to stash in an open IR slot.
+     The veto still applies to every other add.
    - **Proven-starter tiebreak.** Don't churn a healthy, proven starter
      for an unproven free agent on a modest value gap. The gap needs to
      be decisive (roughly 40%+) or the current starter unstartable.
