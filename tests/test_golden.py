@@ -364,6 +364,117 @@ check("ir_line: open IR shows dash names, no warning",
 check("ir_line: no IR slots -> no FULL warning",
       "IR FULL" not in tb.ir_line([], None, 0))
 
+# ---------------- E15: IR stash hunt ------------------------------------
+_E15_PLAYERS = {
+    "1": {"full_name": "Stash Back", "position": "RB", "team": "SEA",
+          "injury_status": "IR"},
+    "2": {"full_name": "Stash Out", "position": "WR", "team": "PIT",
+          "injury_status": "Out"},
+    "3": {"full_name": "Rostered Hurt", "position": "WR", "team": "DAL",
+          "injury_status": "IR"},
+    "4": {"full_name": "Cheap Hurt", "position": "TE", "team": "GB",
+          "injury_status": "IR"},
+    "5": {"full_name": "Healthy Star", "position": "WR", "team": "BUF",
+          "injury_status": None},
+    "6": {"full_name": "Doubtful Hurt", "position": "RB", "team": "KC",
+          "injury_status": "Doubtful"},
+    "7": {"full_name": "Kicker Hurt", "position": "K", "team": "TB",
+          "injury_status": "IR"},
+}
+_E15_FVAL = {
+    "1": (500, 40, 120, 30, False),
+    "2": (400, 50, 150, -20, False),
+    "3": (900, 10, 20, 0, False),
+    "4": (100, 60, 300, 0, False),
+    "5": (2000, 5, 5, 0, False),
+    "6": (600, 30, 90, 0, False),
+    "7": (300, 1, 250, 0, False),
+}
+_E15_GOT = fi.ir_stash_candidates(_E15_PLAYERS, _E15_FVAL, {"3"})
+check("E15: IR/Out free agents above the bar surface, value-sorted",
+      [c["sid"] for c in _E15_GOT] == ["1", "2"],
+      f"got {[c['sid'] for c in _E15_GOT]}")
+check("E15: candidate rows carry name/pos/team/value/trend/trend_class/flag",
+      _E15_GOT and _E15_GOT[0] == {"sid": "1", "name": "Stash Back",
+                                    "pos": "RB", "team": "SEA", "value": 500,
+                                    "trend": 30, "trend_class": "surging",
+                                    "flag": "IR"},
+      f"got {_E15_GOT[:1]}")
+check("E15: rostered IR player excluded (he's not on the wire)",
+      not any(c["sid"] == "3" for c in _E15_GOT))
+check("E15: below-bar IR player excluded",
+      not any(c["sid"] == "4" for c in _E15_GOT))
+check("E15: healthy player excluded (veto exception is IR/Out only)",
+      not any(c["sid"] == "5" for c in _E15_GOT))
+check("E15: Doubtful excluded (IR/Out only — no invented return)",
+      not any(c["sid"] == "6" for c in _E15_GOT))
+check("E15: K/DEF excluded (no FC value, not stash targets)",
+      not any(c["sid"] == "7" for c in _E15_GOT))
+check("E15: mode 4-team -> suppress (wire is an ocean)",
+      fi.ir_stash_mode(4, 6, 11, 1, 1) == "suppress")
+check("E15: mode post-deadline -> suppress (waivers-only mode)",
+      fi.ir_stash_mode(14, 12, 11, 1, 1) == "suppress")
+check("E15: mode no IR slots -> suppress (no stash mechanism)",
+      fi.ir_stash_mode(14, 6, 11, 0, 0) == "suppress")
+check("E15: mode IR full -> watchlist only (no ADD/DROP)",
+      fi.ir_stash_mode(14, 6, 11, 0, 1) == "watchlist")
+check("E15: mode open IR slot -> suggest",
+      fi.ir_stash_mode(14, 6, 11, 1, 1) == "suggest")
+
+# E15 trend discipline (2026-10-14): cratering stashes (30-day trend <=
+# -50% of value) are watchlist-only — the market is moving away. The
+# 2026-10-13 live case: a 285-value stash with a -1565 trend was
+# recommended, then fell to 248 and below the bar the same day, while a
+# 316-value stash with a +321 trend was the better stash on both axes.
+check("E15: Price case is cratering (285, -1565)",
+      fi.stash_trend_class(285, -1565) == "cratering")
+check("E15: Roman case is surging (316, +321)",
+      fi.stash_trend_class(316, 321) == "surging")
+check("E15: exactly -50% is cratering (boundary)",
+      fi.stash_trend_class(500, -250) == "cratering")
+check("E15: just inside -50% is flat",
+      fi.stash_trend_class(500, -249) == "flat")
+check("E15: zero/None trend is flat",
+      fi.stash_trend_class(500, 0) == "flat"
+      and fi.stash_trend_class(500, None) == "flat")
+check("E15: zero value never craters (no degenerate ratio)",
+      fi.stash_trend_class(0, -10) == "flat")
+check("E15: positive trend is surging",
+      fi.stash_trend_class(500, 1) == "surging")
+_E15T_PLAYERS = {
+    "a": {"full_name": "Crater Star", "position": "RB", "team": "SEA",
+          "injury_status": "IR"},
+    "b": {"full_name": "Surge Flyer", "position": "WR", "team": "PIT",
+          "injury_status": "Out"},
+    "c": {"full_name": "Flat Mid", "position": "WR", "team": "DAL",
+          "injury_status": "IR"},
+    "d": {"full_name": "Surge Stud", "position": "TE", "team": "GB",
+          "injury_status": "Out"},
+}
+_E15T_FVAL = {
+    "a": (900, 10, 20, -600, False),   # cratering: -600 <= -450
+    "b": (300, 50, 150, 50, False),    # surging
+    "c": (500, 40, 120, -100, False),  # flat
+    "d": (700, 30, 90, 200, False),    # surging, pricier than b
+}
+_E15T_GOT = fi.ir_stash_candidates(_E15T_PLAYERS, _E15T_FVAL, set())
+check("E15: surging ranks ahead of flat ahead of cratering — a 900-value "
+      "cratering stash is the worst recommendation",
+      [c["sid"] for c in _E15T_GOT] == ["d", "b", "c", "a"],
+      f"got {[c['sid'] for c in _E15T_GOT]}")
+check("E15: candidate rows carry trend_class",
+      all(c.get("trend_class") in ("surging", "flat", "cratering")
+          for c in _E15T_GOT),
+      f"got {[(c['sid'], c.get('trend_class')) for c in _E15T_GOT]}")
+check("E15: suggest + cratering -> no ADD/DROP (watchlist only)",
+      fi.stash_emit_add({"trend_class": "cratering"}, "suggest") is False)
+check("E15: suggest + surging -> ADD/DROP allowed",
+      fi.stash_emit_add({"trend_class": "surging"}, "suggest") is True)
+check("E15: watchlist mode -> no ADD/DROP even for surging",
+      fi.stash_emit_add({"trend_class": "surging"}, "watchlist") is False)
+check("E15: missing trend_class fails open (old behavior)",
+      fi.stash_emit_add({}, "suggest") is True)
+
 # ---------------- #22: bye-group computation shared by roster + audit ---
 _bypos22 = {
     "QB": [{"id": "q1", "name": "Q B1"}, {"id": "q2", "name": "Q B2"}],
@@ -1787,6 +1898,44 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         check(f"{tag}: header stable: {hdr[:30]}...", hdr in out)
     check(f"{tag}: hold-vs-spend line present",
           "hold-vs-spend" in out and "P(better target emerges" in out)
+    # E15: IR stash hunt — 14-team only, suppressed in the 4-team
+    # league and after the trade deadline (Week 11). When present, the
+    # section must print a body (candidates or the honest empty stub),
+    # never a bare header.
+    if tag == "weekend-warriors":
+        check(f"{tag}: IR stash hunt suppressed (4-team wire is an ocean)",
+              "=== IR STASH HUNT" not in out)
+    else:
+        _w15 = re.search(r"NFL Week (\d+)", out)
+        _wk15 = int(_w15.group(1)) if _w15 else 1
+        if _wk15 <= 11:
+            check(f"{tag}: IR stash hunt section present before deadline",
+                  "=== IR STASH HUNT" in out)
+            if "=== IR STASH HUNT" in out:
+                _sec15 = out.split("=== IR STASH HUNT")[1].split(
+                    "(Persona applies judgment")[0]
+                check(f"{tag}: IR stash section has a body (candidates or "
+                      f"honest stub)",
+                      bool(_sec15.strip()),
+                      f"section: {_sec15[:120]!r}")
+                # E15 trend discipline (2026-10-14): a cratering stash line
+                # must never be followed by an ADD for the same player —
+                # the engine emits watchlist-only there. (Vacuous when the
+                # live wire has no cratering candidate this run.)
+                _craters15 = set()
+                for _ln15 in _sec15.splitlines():
+                    if "(cratering —" in _ln15:
+                        _nm15 = re.match(r"^  (.+?) \([A-Z]+,", _ln15)
+                        if _nm15:
+                            _craters15.add(_nm15.group(1).strip())
+                _stash_adds15 = {m.group(1).strip() for m in re.finditer(
+                    r"^  ADD ([^(]+?) \(.+?\).*— IR stash", _sec15, re.M)}
+                check(f"{tag}: cratering stash never gets an ADD",
+                      not (_craters15 & _stash_adds15),
+                      f"overlap={_craters15 & _stash_adds15}")
+        else:
+            check(f"{tag}: IR stash hunt suppressed after deadline",
+                  "=== IR STASH HUNT" not in out)
     # G8 unification: no suggested-move DROP may carry a G8 protection
     # tag ([handcuff]/[ahead-out]/[rising]) in the clog-audit ranking
     # below it — the two sections must agree on who is droppable.
