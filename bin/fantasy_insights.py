@@ -20,6 +20,9 @@ Feature map:
   G9 bye-crater forecast    bye_craters()       <- FantasyPros byes
   G10 betting cross-check   fetch_week_odds() + start_sit_signals()
                             <- ESPN core API (DraftKings, game-level only)
+  E15 IR stash hunt         ir_stash_candidates() + ir_stash_mode()
+                            <- wire scan for IR/Out free agents worth
+                               stashing in an open IR slot
 
 Rules: read-only everything; never fake data — every fetch helper raises
 on failure and every caller prints a clearly-marked degraded line.
@@ -1112,6 +1115,128 @@ def bye_craters(byes, my_ids, lineup_ids, nfl_week, horizon=4):
         out[wk] = {"total": len(on_bye), "starters": starters,
                    "crater": len(starters) >= 2}
     return out
+
+# ---------------------------------------------------------------- E15 IR stash hunt
+
+# Value bar for an IR stash: tuned to 250 (same order as a startable flex
+# in 14-team). The 300 first guess left the wire permanently empty — the
+# only IR/Out free agent on the 2026-10-13 snapusa wire (Jadarian Price,
+# 284) sat below it, so the section would never fire.
+IR_STASH_MIN_VALUE = 250
+IR_STASH_FLAGS = ("IR", "Out")
+IR_STASH_POSITIONS = ("QB", "RB", "WR", "TE")
+
+# Cratering threshold: 30-day trend that erased >= half the player's
+# current value. A cratering stash is watchlist-only — the market is
+# moving away from the player (2026-10-13 live case: a 285-value stash
+# with a -1565 trend was recommended, then fell to 248 and below the
+# bar the same day).
+STASH_CRATER_RATIO = 0.5
+
+
+def stash_trend_class(value, trend):
+    """E15: classify an IR stash candidate by its 30-day value trend.
+
+    'surging'  — trend > 0: market is pricing him up (best stash).
+    'flat'     — small or no move.
+    'cratering' — trend <= -50% of current value: the market is moving
+    away. Boundary at exactly -50% counts as cratering.
+    """
+    t = trend or 0
+    if t > 0:
+        return "surging"
+    if value and t <= -STASH_CRATER_RATIO * value:
+        return "cratering"
+    return "flat"
+
+
+def ir_stash_candidates(players, fval, rostered,
+                        min_value=IR_STASH_MIN_VALUE,
+                        flags=IR_STASH_FLAGS):
+    """E15: IR stash hunt — free agents flagged IR/Out with meaningful value.
+
+    players: Sleeper players DB {sid: player}. fval: {sid: (value,
+    positionRank, overallRank, trend30Day, displayTrend)} (same tuple the
+    board builds from FantasyCalc). rostered: {sid} on any roster in the
+    league (players + reserve). Returns [{sid, name, pos, team, value,
+    trend, flag}] sorted by value desc.
+
+    Deliberate exception to the injury veto: these players are added
+    PRECISELY because they're injured, to stash in the IR slot.
+
+    Return-timeline gate: Sleeper carries no return date, and no return
+    week is ever invented. The gate is the value itself — FantasyCalc
+    redraft value is ROS-based, so a >= min_value value on an IR/Out
+    player means the market still prices a return; a season-ending
+    injury prices near zero. The call site must still print the
+    "verify timeline in beat reports" caveat.
+    """
+    rostered = {str(x) for x in (rostered or [])}
+    out = []
+    for sid, entry in (fval or {}).items():
+        sid = str(sid)
+        if sid in rostered:
+            continue
+        if isinstance(entry, (tuple, list)):
+            value = entry[0] if len(entry) > 0 else 0
+            trend = entry[3] if len(entry) > 3 else 0
+        else:
+            value, trend = entry, 0
+        if (value or 0) < min_value:
+            continue
+        p = (players or {}).get(sid) or {}
+        if p.get("position") not in IR_STASH_POSITIONS:
+            continue
+        flag = p.get("injury_status") or ""
+        if flag not in flags:
+            continue
+        out.append({"sid": sid,
+                    "name": p.get("full_name") or sid,
+                    "pos": p.get("position"),
+                    "team": p.get("team") or "?",
+                    "value": value,
+                    "trend": trend,
+                    "trend_class": stash_trend_class(value, trend),
+                    "flag": flag})
+    # Rank surging stashes ahead of flat ahead of cratering; within a
+    # class, value desc. A cratering high-value stash is a worse
+    # recommendation than a surging low-value one — the market is
+    # already moving away from the former.
+    _TC_ORDER = {"surging": 0, "flat": 1, "cratering": 2}
+    out.sort(key=lambda d: (_TC_ORDER.get(d["trend_class"], 1), -d["value"]))
+    return out
+
+
+def stash_emit_add(candidate, mode):
+    """E15: True when the board may print an ADD/DROP for this stash.
+
+    Cratering candidates are watchlist-only even in suggest mode — no
+    ADD, no DROP. Missing trend_class fails open (old behavior) so a
+    fixture or caller without the key never drops a candidate silently.
+    """
+    if mode != "suggest":
+        return False
+    return (candidate.get("trend_class") or "") != "cratering"
+
+
+def ir_stash_mode(num_teams, nfl_week, trade_dl, ir_open, ir_slots):
+    """E15 gating: 'suppress' | 'watchlist' | 'suggest'.
+
+    suppress: 4-team league (wire is an ocean — stashing never pays),
+    deadline passed (waivers-only mode), or no IR mechanism at all.
+    watchlist: IR full — stash needs a player to return first; list
+    candidates with no ADD/DROP. suggest: open IR slot — emit ADD/DROP.
+    """
+    if num_teams <= 4:
+        return "suppress"
+    if nfl_week > trade_dl:
+        return "suppress"
+    if ir_slots <= 0:
+        return "suppress"
+    if ir_open <= 0:
+        return "watchlist"
+    return "suggest"
+
 
 # ---------------------------------------------------------------- G10 betting-market cross-check (start/sit)
 
