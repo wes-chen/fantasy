@@ -1786,6 +1786,54 @@ def main():
             else:
                 print(f"{line} (edge {edge:.1f} vs hold {hv:.1f}: "
                       "spend justified)")
+    # --- E15: IR stash hunt — scan the wire for IR-return candidates ---
+    # Deliberate exception to the injury veto: these players are added
+    # PRECISELY because they're injured, to stash in the IR slot.
+    # Gating: suppressed in the 4-team league and after the trade
+    # deadline; watchlist-only when IR is full; ADD/DROP when a slot is
+    # open. The DROP draws from the same G8-protected pool as the waiver
+    # suggestions, so the sections never disagree on who is droppable.
+    _stash_mode = fi.ir_stash_mode(num_teams, nfl_week, trade_dl,
+                                    _sm["ir_open"], _sm["ir_slots"])
+    if _stash_mode != "suppress":
+        print()
+        print("=== IR STASH HUNT (E15: injured free agents worth stashing) ===")
+        _stashes = fi.ir_stash_candidates(players, fval, rostered)
+        if not _stashes:
+            print("  (no IR/Out free agent clears the value bar this week)")
+        if _stash_mode == "watchlist":
+            print("  IR full — stash needs a player to return first "
+                  "(watchlist only)")
+        for _c in _stashes:
+            _tc = _c.get("trend_class") or ""
+            if _tc == "cratering":
+                # Engine-enforced trend discipline (layer 10): the market
+                # is moving away — watchlist only, never an ADD/DROP.
+                print(f"  {_c['name']} ({_c['pos']},{_c['team']}) "
+                      f"[!{_c['flag']}] — priced "
+                      f"{fstr(_c['sid'], _c['value'])} but 30-day trend "
+                      f"{int(_c['trend']):+} (cratering — market is moving "
+                      f"away; watchlist only, no ADD)")
+            else:
+                print(f"  {_c['name']} ({_c['pos']},{_c['team']}) "
+                      f"[!{_c['flag']}] — priced "
+                      f"{fstr(_c['sid'], _c['value'])} despite {_c['flag']} — "
+                      f"market still prices a return; verify timeline in "
+                      f"beat reports before adding")
+            if not fi.stash_emit_add(_c, _stash_mode):
+                continue
+            _sp = _path(_c["sid"])
+            if not _sm["drop_needed"]:
+                print(f"  ADD {_c['name']} ({_c['pos']}) — IR stash, move "
+                      f"to IR on add; no drop needed (open bench slot)"
+                      + _pathtag(_sp))
+            elif _drop_pool:
+                _dp = _drop_pool[0]
+                print(f"  ADD {_c['name']} ({_c['pos']}) / "
+                      f"DROP {_dp['name']} ({_dp['pos']},{_dp['val']}) — "
+                      f"IR stash, move to IR on add" + _pathtag(_sp))
+            else:
+                print("  (no droppable bench — no stash move)")
     print()
     print("(Persona applies judgment on top: roster-context vetoes, "
           "both-sides motivation, market comps above.)")
