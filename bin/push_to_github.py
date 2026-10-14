@@ -17,7 +17,7 @@ import base64
 import urllib.request
 import urllib.error
 
-sys.path.insert(0, "/opt/hatch/skills/skill-creator/bin")
+sys.path.insert(0, "/opt/muse/skills/custom-connector-setup/bin")
 from dynamic_credentials import add_surrogate_to_request, read_json_response
 
 REPO = "wes-chen/fantasy"
