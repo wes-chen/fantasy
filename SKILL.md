@@ -75,8 +75,10 @@ FULL means every ADD needs a DROP, and on a FULL roster the DROP is always
 an active-roster player — dropping an IR/reserve occupant frees no active
 bench slot, so reserve occupants never appear as drops there), add/drop suggestions vs his
 droppable bench with every ADD tagged [FA NOW] (instant add, no
-priority cost) or [CLAIM — clears Tue 12:00am PT, burns #N] from recent
-drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18),
+priority cost) or [CLAIM — clears Wed 11:00pm PT, burns #N] from recent
+drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18 —
+the clear time is the observed per-league waiver run (ADV-FF-20), since
+Sleeper's waiver_day_of_week field still claims a Monday/Tuesday clear),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
@@ -196,7 +198,7 @@ be redundant):
      over Otton, applied in reverse.
    - **Acquisition path.** Read the engine's [FA NOW]/[CLAIM] tag on
      every ADD before naming the move: FA NOW is instant and costs no
-     priority; a CLAIM clears at the Tuesday midnight reset and burns
+     priority; a CLAIM clears at the Wednesday 11:00pm PT weekly run and burns
      his waiver slot — price the slot only for claims (his 9/23 ruling).
      Read the engine's slot-check line before ever writing "no drop
      needed": it validates live active-vs-max math with the reserve
