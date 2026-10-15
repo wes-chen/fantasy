@@ -22,7 +22,13 @@ import tempfile
 import time
 from datetime import date
 
-SKILL = os.path.expanduser("~/workspace/skills/fantasy-trade-analyst")
+# ADV-FF-20: derive SKILL from this file's own location, not a hardcoded
+# path. The old hardcoded "~/workspace/skills/fantasy-trade-analyst" was a
+# stale duplicate of the working copy, so the suite imported and
+# subprocess-ran the previous day's engine instead of the code under test —
+# the ADV-FF-11 contract ("run from the skill dir") was silently testing
+# the wrong tree. Self-locating kills that class.
+SKILL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(SKILL, "bin"))
 import trade_board as tb  # noqa: E402  (import runs no network)
 import fantasy_insights as fi  # noqa: E402
@@ -514,10 +520,26 @@ check("acquisition_path: never dropped -> fa",
 check("acquisition_path: bad waiver_clear_days falls back to 2",
       tb.acquisition_path("p1", {"p1": _NOW - 1 * 86400 * 1000},
                           None, _NOW) == "claim")
-check("clear_label: waiver_day_of_week 1 -> Tuesday midnight (verified)",
-      tb.clear_label({"waiver_day_of_week": 1}) == "clears Tue 12:00am PT")
-check("clear_label: unverified day is flagged, not asserted",
-      "unverified" in tb.clear_label({"waiver_day_of_week": 3}))
+check("clear_label: snapusa -> observed Wed 11pm PT run (ADV-FF-20)",
+      tb.clear_label({"league_id": "1320161122837368832",
+                      "settings": {"waiver_day_of_week": 1}})
+      == "clears Wed 11:00pm PT")
+check("clear_label: weekend warriors -> observed Wed 11pm PT run",
+      tb.clear_label({"league_id": "1379714328738955264",
+                      "settings": {"waiver_day_of_week": 1}})
+      == "clears Wed 11:00pm PT")
+check("clear_label: stale waiver_day_of_week 1 never re-asserts Tuesday",
+      "Tue" not in tb.clear_label({"league_id": "unknown-league",
+                                   "settings": {"waiver_day_of_week": 1}}))
+check("clear_label: unknown league -> unverified, not asserted",
+      "unverified" in tb.clear_label({"settings": {"waiver_day_of_week": 3}}))
+check("clear_label: None league -> unverified, no crash",
+      "unverified" in tb.clear_label(None))
+check("clear_label: table has both leagues pinned (tripwire against drift)",
+      set(tb.WAIVER_RUN_LABEL) == {"1320161122837368832",
+                                   "1379714328738955264"}
+      and all("Wed 11:00pm PT" in v
+              for v in tb.WAIVER_RUN_LABEL.values()))
 
 # Sleeper double-lists IR occupants in `players`: active must subtract
 # the reserve overlap (the 9/23 Pacheco case: 17 listed, 1 in reserve,
@@ -2048,7 +2070,7 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           not _untagged, f"untagged moves: {_untagged}")
     check(f"{tag}: CLAIM tag names clear time and slot (ADV-FF-18)",
           not any("[CLAIM" in ln for ln in _moves)
-          or all("clears Tue 12:00am PT" in ln and "burns #" in ln
+          or all("clears Wed 11:00pm PT" in ln and "burns #" in ln
                  for ln in _moves if "[CLAIM" in ln))
     # E14 follow-up: on a FULL roster the DROP in every suggested move must
     # be an active player — dropping an IR/reserve occupant frees no active
