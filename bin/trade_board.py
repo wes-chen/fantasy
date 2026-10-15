@@ -48,7 +48,8 @@ def g1_veto_injured(buys, sells, inj_of):
 # --- NF-01: waiver priority cost model (see gap-analysis NF-01) ---
 # The engine suggests ADD/DROP pairs but never priced the priority slot
 # burned. Opportunity cost = P(a better target emerges before the weekly
-# Tuesday reset) x typical pickup value; scarce slots demand a bigger edge.
+# waiver run — Wed 11:00pm PT, ADV-FF-20) x typical pickup value; scarce
+# slots demand a bigger edge.
 BASE_EMERGE = 0.6     # ~3-in-5 weeks a claim-worthy target emerges on a RICH
                       # wire; scaled down by wire richness for deep leagues
 SCARCE_SLOT_CUTOFF = 3  # slots 1..3 are scarce: spending one is a real cost
@@ -127,7 +128,7 @@ def slot_scarcity(position, num_teams):
 
 def hold_value(position, num_teams, typical_edge):
     """Expected value of holding the slot: P(better target emerges before
-    the Tuesday reset) x typical pickup edge.
+    the Wednesday run) x typical pickup edge.
 
     P = base emergence x slot scarcity x wire richness. Rationale: in a
     rich-wire small league a #1 slot is likely to catch a better target
@@ -156,10 +157,11 @@ INJURY_DISCOUNT = {  # E5: discount stale values before RANKING (ADV-FF-10)
 
 def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
     """FA NOW vs CLAIM (ADV-FF-18): a player dropped within the league's
-    waiver_clear_days sits on waivers (claim: clears Tuesday, burns his
-    priority slot); anything else is an instant free-agent add with no
-    priority cost. Wesley's 9/23 ruling: price priority only when a claim
-    is actually required."""
+    waiver_clear_days sits on waivers (claim: clears at the league's weekly
+    run — Wed 11:00pm PT both leagues, ADV-FF-20 — and burns his priority
+    slot); anything else is an instant free-agent add with no priority cost.
+    Wesley's 9/23 ruling: price priority only when a claim is actually
+    required."""
     pid = str(pid)
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     try:
@@ -171,12 +173,29 @@ def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
         return "claim"
     return "fa"
 
-def clear_label(league_settings):
-    """Waiver-clear wording. Sleeper waiver_day_of_week: 1 is verified
-    to clear at midnight at the end of Monday, going into Tuesday."""
-    dow = (league_settings or {}).get("waiver_day_of_week")
-    if dow == 1:
-        return "clears Tue 12:00am PT"
+# ADV-FF-20: the league's real waiver-run time, from live observation.
+# Wesley confirmed it 2026-10-14 ("yeah that waiver is running at wed 11pm")
+# after the Chase triple-nudge fiasco, and his snapusa Roman Wilson claim
+# cleared at the Wednesday 11:00pm PT run that night. Sleeper's
+# waiver_day_of_week field still reads 1 (Monday), which the old code
+# mapped to "clears Tue 12:00am PT" — that mapping is stale and no longer
+# trusted. If a claim ever clears at a different time, update this table:
+# the golden tests pin the labels, so drift trips a test instead of him.
+WAIVER_RUN_LABEL = {
+    "1320161122837368832": "clears Wed 11:00pm PT",   # snapusa
+    "1379714328738955264": "clears Wed 11:00pm PT",   # weekend warriors
+}
+
+
+def clear_label(league):
+    """Waiver-clear wording. Prefer the observed per-league run time
+    (WAIVER_RUN_LABEL); fall back to the Sleeper waiver_day_of_week field
+    marked unverified — that field once lied about a Tuesday clear."""
+    league = league or {}
+    lid = str(league.get("league_id") or "")
+    if lid in WAIVER_RUN_LABEL:
+        return WAIVER_RUN_LABEL[lid]
+    dow = (league.get("settings") or {}).get("waiver_day_of_week")
     return f"clears (waiver day {dow} — unverified)"
 
 def slot_math(roster, rp, reserve_slots):
@@ -1592,11 +1611,13 @@ def main():
         bench.extend(me["bypos"].get(p, [])[eff_slots[p]:])
     bench.sort(key=lambda x: x["val"])
     # ADV-FF-18: every suggested ADD is labeled FA NOW (instant add, no
-    # priority cost) or CLAIM (waiver-locked: clears Tue, burns his slot)
-    # from the recent-drop timestamps — Wesley's 9/23 "FA or claim?" ask.
+    # priority cost) or CLAIM (waiver-locked: clears at the Wed 11:00pm PT
+    # run, burns his slot) from the recent-drop timestamps — Wesley's 9/23
+    # "FA or claim?" ask. ADV-FF-20: the clear time is the observed
+    # per-league run (WAIVER_RUN_LABEL), not the stale Sleeper field.
     _clear_days = (league.get("settings") or {}).get("waiver_clear_days", 2)
     _now_ms = int(time.time() * 1000)
-    _clear_lbl = clear_label(league.get("settings"))
+    _clear_lbl = clear_label(league)
     _waiver_slot = waiver_slot(rosters, a.me)
 
     def _path(fapid):
@@ -1764,8 +1785,8 @@ def main():
         typical = (sorted(v_edges)[len(v_edges) // 2] if v_edges
                    else TYPICAL_EDGE_FALLBACK)
         p, hv = hold_value(slot, num_teams, typical)
-        print("  hold-vs-spend: P(better target emerges before the Tuesday "
-              f"reset) = {p:.2f} x typical edge {typical:.1f} "
+        print("  hold-vs-spend: P(better target emerges before the Wed 11pm "
+              f"run) = {p:.2f} x typical edge {typical:.1f} "
               f"-> hold value {hv:.1f}")
         print(f"    (P = {BASE_EMERGE} base x "
               f"{slot_scarcity(slot, num_teams):.2f} slot scarcity x "
