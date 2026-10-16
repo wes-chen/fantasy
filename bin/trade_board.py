@@ -13,6 +13,8 @@ Usage:
                  [--players-cache ~/workspace/sleeper/players.json]
 """
 import argparse, json, os, re, sys, time, urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fantasy_insights as fi  # G1-G10 analytics (pure functions + fetchers)
@@ -48,7 +50,7 @@ def g1_veto_injured(buys, sells, inj_of):
 # --- NF-01: waiver priority cost model (see gap-analysis NF-01) ---
 # The engine suggests ADD/DROP pairs but never priced the priority slot
 # burned. Opportunity cost = P(a better target emerges before the weekly
-# waiver run — Wed 11:00pm PT, ADV-FF-20) x typical pickup value; scarce
+# waiver run — per-league, ADV-FF-20) x typical pickup value; scarce
 # slots demand a bigger edge.
 BASE_EMERGE = 0.6     # ~3-in-5 weeks a claim-worthy target emerges on a RICH
                       # wire; scaled down by wire richness for deep leagues
@@ -128,7 +130,7 @@ def slot_scarcity(position, num_teams):
 
 def hold_value(position, num_teams, typical_edge):
     """Expected value of holding the slot: P(better target emerges before
-    the Wednesday run) x typical pickup edge.
+    the league's weekly waiver run) x typical pickup edge.
 
     P = base emergence x slot scarcity x wire richness. Rationale: in a
     rich-wire small league a #1 slot is likely to catch a better target
@@ -157,9 +159,10 @@ INJURY_DISCOUNT = {  # E5: discount stale values before RANKING (ADV-FF-10)
 
 def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
     """FA NOW vs CLAIM (ADV-FF-18): a player dropped within the league's
-    waiver_clear_days sits on waivers (claim: clears at the league's weekly
-    run — Wed 11:00pm PT both leagues, ADV-FF-20 — and burns his priority
-    slot); anything else is an instant free-agent add with no priority cost.
+    waiver_clear_days sits on waivers (claim: clears ~waiver_clear_days
+    after the drop on his own schedule — observed 2026-10-15, or at the
+    league's weekly run if past the window — and burns his priority slot);
+    anything else is an instant free-agent add with no priority cost.
     Wesley's 9/23 ruling: price priority only when a claim is actually
     required."""
     pid = str(pid)
@@ -173,17 +176,21 @@ def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
         return "claim"
     return "fa"
 
-# ADV-FF-20: the league's real waiver-run time, from live observation.
-# Wesley confirmed it 2026-10-14 ("yeah that waiver is running at wed 11pm")
-# after the Chase triple-nudge fiasco, and his snapusa Roman Wilson claim
-# cleared at the Wednesday 11:00pm PT run that night. Sleeper's
-# waiver_day_of_week field still reads 1 (Monday), which the old code
-# mapped to "clears Tue 12:00am PT" — that mapping is stale and no longer
-# trusted. If a claim ever clears at a different time, update this table:
-# the golden tests pin the labels, so drift trips a test instead of him.
+# ADV-FF-20 (corrected 2026-10-16): the league's real waiver-run time, from
+# live observation. snapusa: Wesley confirmed 2026-10-14 ("yeah that waiver
+# is running at wed 11pm") after the Chase triple-nudge fiasco, and his
+# Roman Wilson claim cleared at the Wednesday 11:00pm PT run that night.
+# weekend warriors: live transaction history shows processed claims on
+# Tuesdays at ~12:02am PT (verified 9/22, 9/29, 10/6) — the 2026-10-15
+# ADV-FF-20 change wrongly pinned Wednesday for both leagues.
+# Sleeper's waiver_day_of_week field still reads 1 (Monday), which the old
+# code mapped to "clears Tue 12:00am PT" — that mapping is stale and no
+# longer trusted. If a claim ever clears at a different time, update this
+# table: the golden tests pin the labels, so drift trips a test instead
+# of him.
 WAIVER_RUN_LABEL = {
     "1320161122837368832": "clears Wed 11:00pm PT",   # snapusa
-    "1379714328738955264": "clears Wed 11:00pm PT",   # weekend warriors
+    "1379714328738955264": "clears Tue ~12:02am PT",  # weekend warriors
 }
 
 
@@ -197,6 +204,34 @@ def clear_label(league):
         return WAIVER_RUN_LABEL[lid]
     dow = (league.get("settings") or {}).get("waiver_day_of_week")
     return f"clears (waiver day {dow} — unverified)"
+
+def claim_eta(fapid, recent_drops, waiver_clear_days=2, weekly_lbl="",
+              now_ms=None):
+    """Clear-time wording for a CLAIM tag. A player dropped inside the
+    league's waiver-clear window clears ~waiver_clear_days after the drop
+    on his own schedule — NOT at the weekly run. Observed 2026-10-15:
+    Ja'Marr Chase was dropped Tue ~12:59pm PT and cleared Thu ~12:02pm PT
+    (~47h), never waiting for the Tue 10/20 weekly run (Wesley's 2-day
+    cooldown correction). Anything past the window uses the weekly-run
+    label, since the claim then sits for the next weekly process."""
+    pid = str(fapid)
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    try:
+        days = int(waiver_clear_days or 2)
+    except (TypeError, ValueError):
+        days = 2
+    try:
+        dropped_at = int((recent_drops or {}).get(pid))
+    except (TypeError, ValueError):
+        dropped_at = None
+    if dropped_at and (now_ms - dropped_at) < days * 86400 * 1000:
+        eta = datetime.fromtimestamp((dropped_at + days * 86400 * 1000)
+                                     / 1000,
+                                     tz=ZoneInfo("America/Los_Angeles"))
+        return (f"clears ~{eta.strftime('%a')} "
+                f"{eta.strftime('%I:%M%p').lower().lstrip('0')} PT "
+                f"({days}d drop cooldown)")
+    return weekly_lbl
 
 def slot_math(roster, rp, reserve_slots):
     """Live active/bench/IR arithmetic (E14). Sleeper double-lists IR
@@ -1611,9 +1646,10 @@ def main():
         bench.extend(me["bypos"].get(p, [])[eff_slots[p]:])
     bench.sort(key=lambda x: x["val"])
     # ADV-FF-18: every suggested ADD is labeled FA NOW (instant add, no
-    # priority cost) or CLAIM (waiver-locked: clears at the Wed 11:00pm PT
-    # run, burns his slot) from the recent-drop timestamps — Wesley's 9/23
-    # "FA or claim?" ask. ADV-FF-20: the clear time is the observed
+    # priority cost) or CLAIM (waiver-locked: burns his slot — clears
+    # ~waiver_clear_days after a recent drop, else at the per-league
+    # weekly run) from the recent-drop timestamps — Wesley's 9/23
+    # "FA or claim?" ask. ADV-FF-20: the run time is the observed
     # per-league run (WAIVER_RUN_LABEL), not the stale Sleeper field.
     _clear_days = (league.get("settings") or {}).get("waiver_clear_days", 2)
     _now_ms = int(time.time() * 1000)
@@ -1623,9 +1659,15 @@ def main():
     def _path(fapid):
         return acquisition_path(fapid, recent_drops, _clear_days, _now_ms)
 
-    def _pathtag(path):
+    def _pathtag(path, fapid):
         if path == "claim":
-            return f" [CLAIM — {_clear_lbl}, burns #{_waiver_slot}]"
+            # claim_eta: a recently dropped player clears ~waiver_clear_days
+            # after the drop on his own schedule (the observed Chase case),
+            # not at the weekly run; anything past the window uses the
+            # weekly-run label.
+            _eta = claim_eta(fapid, recent_drops, _clear_days, _clear_lbl,
+                             _now_ms)
+            return f" [CLAIM — {_eta}, burns #{_waiver_slot}]"
         return " [FA NOW — instant add, no priority cost]"
 
     # E14 follow-up: slot math must be known BEFORE suggestions emit — on a
@@ -1688,7 +1730,7 @@ def main():
                                 f"  ADD {_fan} ({pos}) / "
                                 f"DROP {cur['name']} ({pos}) — "
                                 f"your {pos} is {cur_inj}"
-                                + _pathtag(_p)))
+                                + _pathtag(_p, _fapid)))
                 else:
                     _fa_rank = kdef_fp.get(_fapid)
                     _cur_rank = kdef_fp.get(cur["id"])
@@ -1703,7 +1745,7 @@ def main():
                                     _fapid, _p,
                                     f"  ADD {_fan} ({pos},FP-ROS #{_fa_rank}) / "
                                     f"DROP {cur['name']} ({pos},FP-ROS #{_cur_rank})"
-                                    + _pathtag(_p)))
+                                    + _pathtag(_p, _fapid)))
             continue
         fav, fan, fainj, fapid = fa_by_pos[pos][0]
         if fav <= 0 or fainj in HURT:
@@ -1714,7 +1756,7 @@ def main():
                 sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
                             f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
                             f"DROP {b['name']} ({b['pos']},{b['val']})"
-                            + _pathtag(_p)))
+                            + _pathtag(_p, fapid)))
                 break
     sug.sort(key=lambda t: t[0], reverse=True)
     # E14: validate slot arithmetic before emitting — the 9/23 Rodgers
@@ -1785,8 +1827,8 @@ def main():
         typical = (sorted(v_edges)[len(v_edges) // 2] if v_edges
                    else TYPICAL_EDGE_FALLBACK)
         p, hv = hold_value(slot, num_teams, typical)
-        print("  hold-vs-spend: P(better target emerges before the Wed 11pm "
-              f"run) = {p:.2f} x typical edge {typical:.1f} "
+        print(f"  hold-vs-spend: P(better target emerges before the weekly "
+              f"run ({_clear_lbl})) = {p:.2f} x typical edge {typical:.1f} "
               f"-> hold value {hv:.1f}")
         print(f"    (P = {BASE_EMERGE} base x "
               f"{slot_scarcity(slot, num_teams):.2f} slot scarcity x "
@@ -1847,12 +1889,12 @@ def main():
             if not _sm["drop_needed"]:
                 print(f"  ADD {_c['name']} ({_c['pos']}) — IR stash, move "
                       f"to IR on add; no drop needed (open bench slot)"
-                      + _pathtag(_sp))
+                      + _pathtag(_sp, _c["sid"]))
             elif _drop_pool:
                 _dp = _drop_pool[0]
                 print(f"  ADD {_c['name']} ({_c['pos']}) / "
                       f"DROP {_dp['name']} ({_dp['pos']},{_dp['val']}) — "
-                      f"IR stash, move to IR on add" + _pathtag(_sp))
+                      f"IR stash, move to IR on add" + _pathtag(_sp, _c["sid"]))
             else:
                 print("  (no droppable bench — no stash move)")
     print()
