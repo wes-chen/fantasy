@@ -20,7 +20,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 # ADV-FF-20: derive SKILL from this file's own location, not a hardcoded
 # path. The old hardcoded "~/workspace/skills/fantasy-trade-analyst" was a
@@ -524,10 +525,11 @@ check("clear_label: snapusa -> observed Wed 11pm PT run (ADV-FF-20)",
       tb.clear_label({"league_id": "1320161122837368832",
                       "settings": {"waiver_day_of_week": 1}})
       == "clears Wed 11:00pm PT")
-check("clear_label: weekend warriors -> observed Wed 11pm PT run",
+check("clear_label: weekend warriors -> observed Tue ~12:02am PT run "
+      "(2026-10-15 correction: live tx history 9/22, 9/29, 10/6)",
       tb.clear_label({"league_id": "1379714328738955264",
                       "settings": {"waiver_day_of_week": 1}})
-      == "clears Wed 11:00pm PT")
+      == "clears Tue ~12:02am PT")
 check("clear_label: stale waiver_day_of_week 1 never re-asserts Tuesday",
       "Tue" not in tb.clear_label({"league_id": "unknown-league",
                                    "settings": {"waiver_day_of_week": 1}}))
@@ -538,8 +540,40 @@ check("clear_label: None league -> unverified, no crash",
 check("clear_label: table has both leagues pinned (tripwire against drift)",
       set(tb.WAIVER_RUN_LABEL) == {"1320161122837368832",
                                    "1379714328738955264"}
-      and all("Wed 11:00pm PT" in v
-              for v in tb.WAIVER_RUN_LABEL.values()))
+      and "Wed 11:00pm PT" in tb.WAIVER_RUN_LABEL["1320161122837368832"]
+      and "Tue" in tb.WAIVER_RUN_LABEL["1379714328738955264"])
+# claim_eta (2026-10-16): a player dropped inside the waiver-clear window
+# clears ~waiver_clear_days after the drop on his own schedule (the
+# observed Chase case: dropped Tue 10/13 ~12:59pm PT, cleared Thu ~12:02pm
+# PT, ~47h — not at the weekly run). Past the window, the weekly-run
+# label applies.
+_eta_drop = _NOW - 3600 * 1000  # dropped 1h ago
+_eta_dt = datetime.fromtimestamp((_eta_drop + 2 * 86400 * 1000) / 1000,
+                                 tz=ZoneInfo("America/Los_Angeles"))
+_eta_exp = (f"clears ~{_eta_dt.strftime('%a')} "
+            f"{_eta_dt.strftime('%I:%M%p').lower().lstrip('0')} PT "
+            "(2d drop cooldown)")
+check("claim_eta: recent drop -> cooldown ETA, exact rendering",
+      tb.claim_eta("p1", {"p1": _eta_drop}, 2, "WEEKLY", _NOW) == _eta_exp)
+check("claim_eta: cooldown ETA mentions the drop cooldown, not a run",
+      "drop cooldown" in tb.claim_eta("p1", {"p1": _eta_drop}, 2,
+                                      "WEEKLY", _NOW)
+      and "run" not in tb.claim_eta("p1", {"p1": _eta_drop}, 2,
+                                    "WEEKLY", _NOW))
+check("claim_eta: stale drop (past window) -> weekly-run label",
+      tb.claim_eta("p1", {"p1": _NOW - 3 * 86400 * 1000}, 2,
+                   "WEEKLY", _NOW) == "WEEKLY")
+check("claim_eta: exactly at the window boundary -> weekly-run label",
+      tb.claim_eta("p1", {"p1": _NOW - 2 * 86400 * 1000}, 2,
+                   "WEEKLY", _NOW) == "WEEKLY")
+check("claim_eta: never dropped -> weekly-run label",
+      tb.claim_eta("p9", {}, 2, "WEEKLY", _NOW) == "WEEKLY")
+check("claim_eta: bad waiver_clear_days falls back to 2",
+      tb.claim_eta("p1", {"p1": _eta_drop}, None, "WEEKLY", _NOW)
+      == _eta_exp)
+check("claim_eta: corrupt drop timestamp -> weekly-run label, no crash",
+      tb.claim_eta("p1", {"p1": "not-a-time"}, 2, "WEEKLY", _NOW)
+      == "WEEKLY")
 
 # Sleeper double-lists IR occupants in `players`: active must subtract
 # the reserve overlap (the 9/23 Pacheco case: 17 listed, 1 in reserve,
@@ -2070,8 +2104,17 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           not _untagged, f"untagged moves: {_untagged}")
     check(f"{tag}: CLAIM tag names clear time and slot (ADV-FF-18)",
           not any("[CLAIM" in ln for ln in _moves)
-          or all("clears Wed 11:00pm PT" in ln and "burns #" in ln
+          or all("clears " in ln and "burns #" in ln
                  for ln in _moves if "[CLAIM" in ln))
+    # 2026-10-16: a CLAIM on a recently dropped player must show the
+    # per-player drop-cooldown ETA, never the weekly-run label (the
+    # observed Chase case). Parse every CLAIM line and, if it carries a
+    # drop-cooldown ETA, verify the shape.
+    check(f"{tag}: CLAIM drop-cooldown ETAs render the ETA shape",
+          all(re.search(r"clears ~\w\w\w \d{1,2}:\d\d[ap]m PT "
+                        r"\(\d+d drop cooldown\)", ln) is not None
+              for ln in _moves
+              if "[CLAIM" in ln and "drop cooldown" in ln))
     # E14 follow-up: on a FULL roster the DROP in every suggested move must
     # be an active player — dropping an IR/reserve occupant frees no active
     # bench slot, so the ADD would have nowhere to go.
