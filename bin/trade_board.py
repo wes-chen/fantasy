@@ -478,6 +478,57 @@ def load_pending_offers(path, league=None):
                              "notes": notes}
     return onblock
 
+
+def load_pending_claims(path, league=None):
+    """Wesley's own pending waiver claims. Returns {player_id: info} for
+    status=pending rows. (Pending claims are invisible to the Sleeper API —
+    he files them manually in the app — so this chat-driven registry is the
+    only record; Rumi adds a row when he says "I put in a claim for <name>".)
+
+    league: short tag ("snapusa"/"ww") scoping per league (gh #26 logic,
+    same as pending offers). A row carrying a league tag applies only in
+    that league; legacy rows with no league column apply in every league."""
+    claims = {}
+    try:
+        fh = open(path)
+    except FileNotFoundError:
+        return claims
+    for line in fh:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 5 or parts[4].lower() != "pending":
+            continue
+        if len(parts) >= 7 and parts[5].lower() in ("snapusa", "ww"):
+            row_league = parts[5].lower()
+            notes = "|".join(parts[6:]).strip()
+        else:
+            row_league = None
+            notes = "|".join(parts[5:]).strip()
+        if league is not None and row_league is not None and row_league != league:
+            continue
+        claims[parts[0]] = {"name": parts[1], "pos": parts[2],
+                            "date": parts[3], "league": row_league,
+                            "notes": notes}
+    return claims
+
+
+def claim_resolution(pid, my_rid, owner_of, rid2name):
+    """Classify a pending claim against live rosters. Returns (state, extra):
+    ("cleared", None) — the claimed player is now on his roster;
+    ("failed", manager_name) — the claim lost and the player sits on another
+    roster; ("pending", None) — still a free agent, claim outstanding.
+    Pure: the board prints this; chat resolves the registry row."""
+    pid = str(pid)
+    owner = owner_of.get(pid)
+    if owner is None:
+        return ("pending", None)
+    if str(owner) == str(my_rid):
+        return ("cleared", None)
+    return ("failed", rid2name.get(int(owner), "?"))
+
+
 def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
                my_lineup_dval, my_lineup, my_lineup_ids, fp):
     """Lineup-points delta of the 1-for-1 swap for you: who starts, who sits.
@@ -865,6 +916,12 @@ def main():
     pending_path = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "pending_offers.md"))
     onblock = load_pending_offers(pending_path, league_tag(a.league))
+    # --- Wesley's own pending waiver claims (invisible to the Sleeper API —
+    # he files them manually in the app). Claimed players are tagged
+    # [CLAIM-PENDING] on FA lines and never re-recommended as ADDs.
+    claims_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "pending_claims.md"))
+    claims = load_pending_claims(claims_path, league_tag(a.league))
 
     def pname(pid):
         # #29: DEFs render as "San Francisco 49ers DEF", not a bare "SF"
@@ -1608,7 +1665,8 @@ def main():
             else:
                 val = fstr(pid_s, v)
             return (f"{n}({val}){_btag({'id': pid_s})}"
-                    + (f"[!{inj}]" if inj else ""))
+                    + (f"[!{inj}]" if inj else "")
+                    + ("[CLAIM-PENDING]" if pid_s in claims else ""))
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
                         for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
@@ -1636,7 +1694,8 @@ def main():
                 if _row["accel"] is not None else "NEW")
         tfa.append(
             f"{_row['name']}({fstr(_pid, v)},+{_row['c24']}/24h,{_vel})"
-            + (f"[!{inj}]" if inj in HURT else ""))
+            + (f"[!{inj}]" if inj in HURT else "")
+            + ("[CLAIM-PENDING]" if _pid in claims else ""))
         if len(tfa) >= 8:
             break
     print(f"  trending velocity (Sleeper-wide adds, 24h vs previous scan): "
@@ -1670,6 +1729,32 @@ def main():
             return f" [CLAIM — {_eta}, burns #{_waiver_slot}]"
         return " [FA NOW — instant add, no priority cost]"
 
+    # Pending waiver claims (chat-driven pending_claims.md — pending claims
+    # are invisible to the Sleeper API, so without this the board
+    # re-recommends players he already filed for, as it did with Chase
+    # 2026-10-13..16). Claimed players are never re-recommended as ADDs
+    # below; each claim's live resolution prints here so chat can settle
+    # the registry row (the board never edits the registry itself).
+    if claims:
+        print("=== PENDING CLAIMS (your open claims — already filed, never re-recommended) ===")
+        for _cid, _c in claims.items():
+            _res, _who = claim_resolution(_cid, my_rid, owner_of, rid2name)
+            _lg = f" [{_c['league']}]" if _c["league"] else ""
+            if _res == "cleared":
+                print(f"  {_c['name']} ({_c['pos']}): claim CLEARED — "
+                      f"on your roster{_lg}")
+            elif _res == "failed":
+                print(f"  {_c['name']} ({_c['pos']}): claim FAILED — "
+                      f"now on {_who}'s roster{_lg}")
+            else:
+                _eta = claim_eta(_cid, recent_drops, _clear_days, _clear_lbl,
+                                 _now_ms)
+                print(f"  {_c['name']} ({_c['pos']}): filed {_c['date']} — "
+                      f"expected {_eta}, burns #{_waiver_slot}"
+                      + (_lg if _lg else "")
+                      + (f" ({_c['notes']})" if _c["notes"] else ""))
+        print()
+
     # E14 follow-up: slot math must be known BEFORE suggestions emit — on a
     # FULL roster the DROP must be an active player, since dropping an
     # IR/reserve occupant frees no active bench slot.
@@ -1699,6 +1784,7 @@ def main():
                                   _sm["drop_needed"], _prot)
 
     sug = []
+    _claimed_skipped = 0  # pending-claim registry: never re-recommend an ADD
     for pos in WPOS:
         if not fa_by_pos.get(pos):
             continue
@@ -1719,6 +1805,11 @@ def main():
                          in fa_by_pos[pos] if i not in HURT), None)
             if mine and _hfa:
                 _, _fan, _, _fapid = _hfa
+                if _fapid in claims:
+                    # pending-claim registry (Oct 13-16 Chase lesson): he
+                    # already filed for this player — never re-recommend.
+                    _claimed_skipped += 1
+                    continue
                 cur = mine[0]
                 cur_inj = ((players.get(cur["id"], {}) or {})
                            .get("injury_status") or "")
@@ -1750,6 +1841,11 @@ def main():
         fav, fan, fainj, fapid = fa_by_pos[pos][0]
         if fav <= 0 or fainj in HURT:
             continue  # never suggest adding an injured player
+        if fapid in claims:
+            # pending-claim registry (Oct 13-16 Chase lesson): he already
+            # filed for this player — never re-recommend the ADD.
+            _claimed_skipped += 1
+            continue
         for b in _drop_pool:
             if fav > b["val"] * CHURN_THRESHOLD:
                 _p = _path(fapid)
@@ -1773,6 +1869,9 @@ def main():
     print("  suggested moves:")
     for _, _, _, _, _, _, line in sug[:5]:
         print(line)
+    if _claimed_skipped:
+        print(f"  ({_claimed_skipped} claim-pending player(s) skipped: "
+              f"already claimed)")
     if not sug:
         print("  (no FA beats your droppable bench)")
     print("  roster-clog audit (G8: bench by contingent value, low = droppable):")
