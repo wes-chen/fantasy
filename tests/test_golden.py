@@ -16,6 +16,7 @@ Run: python3 tests/test_golden.py   (from the skill dir; exit != 0 on failure)
 """
 import os
 import re
+import json
 import subprocess
 import sys
 import tempfile
@@ -321,6 +322,43 @@ check("#26: league_tag unknown id -> None (safe all-leagues fallback)",
       tb.league_tag("999") is None)
 check("pending offers: missing file -> empty, no crash",
       tb.load_pending_offers("/nonexistent/path.md") == {})
+
+
+# ---------------- pending claims registry (Chase 2026-10-13..16 lesson) ----
+with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+    fh.write("# comment\n\n")
+    fh.write("999 | Test Player | WR | 2026-10-16 | pending | snapusa | x\n")
+    fh.write("888 | Other League | RB | 2026-10-16 | pending | ww | y\n")
+    fh.write("777 | Resolved One | TE | 2026-10-10 | cleared | snapusa | z\n")
+    fh.write("666 | Legacy Row | QB | 2026-10-11 | pending | old note\n")
+    ctmp = fh.name
+c_all = tb.load_pending_claims(ctmp)
+c_snap = tb.load_pending_claims(ctmp, "snapusa")
+c_ww = tb.load_pending_claims(ctmp, "ww")
+os.unlink(ctmp)
+check("pending claims: pending parsed, resolved ignored",
+      set(c_all) == {"999", "888", "666"}
+      and c_all["999"]["name"] == "Test Player"
+      and c_all["999"]["pos"] == "WR"
+      and c_all["999"]["date"] == "2026-10-16"
+      and c_all["999"]["league"] == "snapusa", f"got {c_all}")
+check("pending claims: per-league scoping (snapusa sees snapusa + legacy)",
+      set(c_snap) == {"999", "666"}, f"got {set(c_snap)}")
+check("pending claims: per-league scoping (ww sees ww + legacy)",
+      set(c_ww) == {"888", "666"}, f"got {set(c_ww)}")
+check("pending claims: legacy row (no league column) applies everywhere",
+      c_snap["666"]["league"] is None and c_ww["666"]["league"] is None)
+check("pending claims: missing file -> empty, no crash",
+      tb.load_pending_claims("/nonexistent/path.md") == {})
+
+_owner = {"1": "10", "2": "11"}
+_r2n = {10: "wesley", 11: "rival"}
+check("claim_resolution: on his roster -> cleared",
+      tb.claim_resolution("1", "10", _owner, _r2n) == ("cleared", None))
+check("claim_resolution: on another roster -> failed with manager name",
+      tb.claim_resolution("2", "10", _owner, _r2n) == ("failed", "rival"))
+check("claim_resolution: free agent -> pending",
+      tb.claim_resolution("3", "10", _owner, _r2n) == ("pending", None))
 
 
 # ---------------- #18: no real league-mate handles in committed files -----
@@ -2193,6 +2231,100 @@ else:
           "=== PENDING OFFERS" not in out and "[ON-BLOCK" not in out,
           "empty registry must not block any trades")
 check("snapusa: posture line present", "| posture:" in out)
+
+# ---------------- pending claims: fixture-swap end-to-end ----------------
+# The real pending_claims.md is local-only (never pushed) and currently empty
+# (no live claims — Chase cleared 10/15, Roman Wilson 10/14). Swap in a
+# synthetic fixture, run both boards, assert the section / resolutions / the
+# [CLAIM-PENDING] tag / ADD suppression, then restore byte-identical.
+_claims_file = os.path.join(SKILL, "pending_claims.md")
+_claims_orig = (open(_claims_file).read()
+               if os.path.exists(_claims_file) else None)
+try:
+    _sl_rosters = json.loads(_urlreq.urlopen(
+        f"https://api.sleeper.app/v1/league/{SNAPUSA}/rosters",
+        timeout=30).read().decode())
+    _sl_users = {u.get("user_id"): u.get("display_name", "?") for u in
+                 json.loads(_urlreq.urlopen(
+                     f"https://api.sleeper.app/v1/league/{SNAPUSA}/users",
+                     timeout=30).read().decode())}
+    _mine = next(r for r in _sl_rosters if r.get("owner_id") == ME)
+    _mine_pid = str((_mine.get("players") or ["0"])[0])
+    _theirs = next(r for r in _sl_rosters if r.get("owner_id") != ME)
+    _theirs_pid = str((_theirs.get("players") or ["0"])[0])
+    _theirs_disp = _sl_users.get(_theirs.get("owner_id"), "?")
+    _pdb = json.load(open(os.path.expanduser(
+        "~/workspace/sleeper/players.json")))
+    _name2pid = {p.get("full_name"): pid for pid, p in _pdb.items()
+                 if isinstance(p, dict) and p.get("full_name")}
+    # suppression target: first suggested ADD on a clean pass-1 board run
+    # (falls back to a top-FA name, tag-only assertions then). Parse only the
+    # "suggested moves" block — the E15 stash hunt prints its own ADD lines.
+    _pass1 = run_board(SNAPUSA).stdout
+    _sugg_block = re.search(r"  suggested moves:\n((?:  .*\n)+)", _pass1)
+    _sugg_lines = _sugg_block.group(1) if _sugg_block else ""
+    _adds = [a for a in re.findall(r"^  ADD (.+?) \(", _sugg_lines, re.M)
+             if "DEF" not in a]
+    _target_name, _target_pid, _target_assert_add = None, None, False
+    if _adds and _adds[0] in _name2pid:
+        _target_name, _target_pid = _adds[0], _name2pid[_adds[0]]
+        _target_assert_add = True
+    else:
+        _m = re.search(r"^  top FA \w+: ([^(]+)\(", _pass1, re.M)
+        if _m and _m.group(1) in _name2pid:
+            _target_name, _target_pid = _m.group(1), _name2pid[_m.group(1)]
+    with open(_claims_file, "w") as fh:
+        fh.write("99999999 | Synthetic Pending | WR | 2026-10-17 | pending | snapusa | test\n")
+        fh.write(f"{_mine_pid} | Mine Player | RB | 2026-10-17 | pending | snapusa | test\n")
+        fh.write(f"{_theirs_pid} | Theirs Player | WR | 2026-10-17 | pending | snapusa | test\n")
+        if _target_pid:
+            fh.write(f"{_target_pid} | {_target_name} | FA | 2026-10-17 | pending | snapusa | test\n")
+        fh.write("88888888 | WW Only | RB | 2026-10-17 | pending | ww | test\n")
+    _out = run_board(SNAPUSA).stdout
+    check("pending claims: PENDING CLAIMS section prints (snapusa)",
+          "=== PENDING CLAIMS (your open claims" in _out)
+    check("pending claims: still-FA claim shows expected weekly clear",
+          re.search(r"Synthetic Pending \(WR\): filed 2026-10-17 — expected "
+                    r"clears Wed 11:00pm PT, burns #\d+ \[snapusa\]",
+                    _out) is not None, _out[-800:])
+    check("pending claims: claim on his roster -> CLEARED",
+          "Mine Player (RB): claim CLEARED — on your roster [snapusa]" in _out)
+    check("pending claims: claim lost to another roster -> FAILED",
+          f"Theirs Player (WR): claim FAILED — now on {_theirs_disp}'s "
+          f"roster [snapusa]" in _out)
+    if _target_pid:
+        check("pending claims: claimed player tagged on FA lines",
+              "[CLAIM-PENDING]" in _out)
+        check("pending claims: PENDING CLAIMS lists the claim target",
+              f"{_target_name} (FA): filed 2026-10-17 — expected " in _out)
+    if _target_assert_add:
+        _sugg2 = re.search(r"  suggested moves:\n((?:  .*\n)+)", _out)
+        _sugg2_lines = _sugg2.group(1) if _sugg2 else ""
+        check("pending claims: claimed ADD is suppressed, never re-recommended",
+              f"  ADD {_target_name} (" not in _sugg2_lines
+              and "(1 claim-pending player(s) skipped: already claimed)"
+              in _out,
+              "the Oct 13-16 Chase re-recommendation must not recur")
+    _out_ww = run_board(WW).stdout
+    check("pending claims: ww run sees only the ww row (per-league scoping)",
+          "=== PENDING CLAIMS (your open claims" in _out_ww
+          and "WW Only (RB): filed 2026-10-17 — expected "
+          "clears Tue ~12:02am PT" in _out_ww
+          and "Synthetic Pending" not in _out_ww
+          and "Mine Player" not in _out_ww)
+finally:
+    if _claims_orig is None:
+        if os.path.exists(_claims_file):
+            os.unlink(_claims_file)
+    else:
+        with open(_claims_file, "w") as fh:
+            fh.write(_claims_orig)
+    check("pending claims: registry restored byte-identical after test",
+          (_claims_orig is None and not os.path.exists(_claims_file))
+          or open(_claims_file).read() == _claims_orig)
+_push_src = open(os.path.join(SKILL, "bin", "push_to_github.py")).read()
+check("pending claims: registry is local-only, never in the push file set",
+      "pending_claims" not in _push_src)
 
 out_ww = run_board(WW).stdout
 # NF-01: slot values reset weekly in Sleeper — assert the line's internal
