@@ -81,7 +81,13 @@ the clear time is the observed per-league waiver run (ADV-FF-20):
 snapusa clears Wed 11:00pm PT, weekend warriors clears Tue ~12:02am PT;
 a player dropped within the last ~2 days clears on his own drop-cooldown
 schedule instead — Sleeper's waiver_day_of_week field still claims a
-Monday/Tuesday clear),
+Monday/Tuesday clear), a `=== PENDING CLAIMS ===` section (chat-driven
+`pending_claims.md` registry — pending claims are invisible to the Sleeper
+API, so Rumi adds a row when Wesley says he filed a claim; the section
+prints each claim's live resolution — CLEARED on his roster, FAILED on
+another manager's roster, else expected clear — and claimed players carry
+[CLAIM-PENDING] on FA lines and are never re-recommended as ADDs, the
+Oct 13-16 Chase lesson),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
@@ -208,6 +214,9 @@ be redundant):
      schedule (observed: Chase dropped Tue 10/13 ~1pm PT, cleared Thu
      ~12pm PT, ~47h — never waited for the weekly run) — do NOT quote
      the weekly run for a fresh drop.
+     A player carrying the engine's [CLAIM-PENDING] tag has a claim you
+     already know about (pending_claims.md) — never re-recommend the ADD
+     and never price the priority slot twice.
      Read the engine's slot-check line before ever writing "no drop
      needed": it validates live active-vs-max math with the reserve
      overlap subtracted. IR-move advice must first pass the engine's
