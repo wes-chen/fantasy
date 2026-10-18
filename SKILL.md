@@ -23,7 +23,12 @@ slate x0.9-1.1). K and DEF get their own roster lines, priced by
 FantasyPros ROS rank like the waiver lines; a defense renders as
 "San Francisco 49ers DEF" (Sleeper stores DEFs with full_name=None, and
 the old bare-abbrev fallback read as a missing defense in chat), a
-bye-week audit, a 4-week bye-crater forecast (G9 —
+bye-week audit, a coverage-gap audit (14-team leagues only: starting-slot
+positions with no eligible backup beyond the projected starters — the
+live one is TE, where a late scratch is a forced zero; the line carries
+`[EXPOSED: <designation>]` when the lone starter is Questionable or
+worse, and a waiver suggestion that closes a gap is tagged
+`[closes TE coverage gap]`), a 4-week bye-crater forecast (G9 —
 2+ projected starters on the same bye flagged), a value-divergence
 section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated ROS feed only, never draft ranks (gh #24); |diff|
 >= 12 spots flagged as hold/buy-low or sell-high), a usage-gap radar
