@@ -377,6 +377,18 @@ def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids):
     return [b for b in pool if str(b.get("id")) not in prot]
 
 
+def closes_coverage_gap(pos, drop_pos, gap_poses):
+    """Does a waiver ADD at `pos` close a coverage gap?
+
+    Only when the gap is at the added position AND the paired drop isn't
+    at the same position — a TE-for-TE swap closes nothing, while ADD TE /
+    DROP bench WR turns a forced-zero risk into a real bench option.
+    FLEX-POOL gaps are excluded from the tag: a pool gap is a depth
+    problem any flex-eligible add eases, not a slot a single add closes.
+    """
+    return pos in gap_poses and pos != "FLEX-POOL" and drop_pos != pos
+
+
 def ir_capacity(reserve_slots, reserve_count):
     """IR-slot accounting (E13): returns (slots, open).
 
@@ -1258,6 +1270,28 @@ def main():
                        if x["id"] in onblock else ""))
         print(f"  {p}: " + (", ".join(_kd_fmt(x) for x in pls)
                             or "(none rostered)"))
+    # Coverage-gap audit: starting-slot positions with no eligible backup
+    # beyond the projected starters. TE is the live one — a late scratch
+    # at an uncovered TE is a forced zero (flagged by hand twice,
+    # 2026-10-16/17, before this was mechanized). Skipped in wire-rich
+    # leagues (<=6 teams): the wire replaces a scratch the same morning.
+    # Rendered inside YOUR ROSTER — no new section header (the Tuesday
+    # worker parses headers).
+    _inj_of = (lambda sid: ((players.get(str(sid), {}) or {})
+                            .get("injury_status") or ""))
+    _cov_gaps = fi.coverage_gaps(me["bypos"], base_slots, flex_slots,
+                                 _inj_of, num_teams)
+    _cov_gap_poses = {g["pos"] for g in _cov_gaps}  # closes_coverage_gap
+    # owns the FLEX-POOL exclusion for the waiver tag below
+    for _g in _cov_gaps:
+        if _g["pos"] == "TE":
+            _who = _g["starter"] or "NO TE ROSTERED"
+            _exp = f" [EXPOSED: {_g['inj']}]" if _g["inj"] else ""
+            print(f"  coverage gap: TE — no backup behind {_who} "
+                  f"(a late scratch is a forced zero){_exp}")
+        else:
+            print(f"  coverage gap: {_g['detail']} "
+                  f"(any RB/WR/TE injury forces a zero)")
     if me["ir"] or ir_slots:
         print(ir_line(me["ir"], ir_slots, len(me["ir"])))
     print()
@@ -1849,10 +1883,19 @@ def main():
         for b in _drop_pool:
             if fav > b["val"] * CHURN_THRESHOLD:
                 _p = _path(fapid)
+                # Coverage-gap close: an ADD at an uncovered position is
+                # worth more than the raw edge — a second TE turns a
+                # forced-zero risk into a real bench option. The tag only
+                # fires when the drop isn't at the same position (a TE-for-
+                # TE swap closes nothing).
+                _closes = (f" [closes {pos} coverage gap]"
+                           if closes_coverage_gap(pos, b["pos"],
+                                                  _cov_gap_poses)
+                           else "")
                 sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
                             f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
                             f"DROP {b['name']} ({b['pos']},{b['val']})"
-                            + _pathtag(_p, fapid)))
+                            + _pathtag(_p, fapid) + _closes))
                 break
     sug.sort(key=lambda t: t[0], reverse=True)
     # E14: validate slot arithmetic before emitting — the 9/23 Rodgers
