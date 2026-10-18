@@ -1028,6 +1028,46 @@ def infer_backups_from_snaps(snaps_csv, team):
     return [(nm, round(a, 1), "INFERRED from snap share") for a, nm in avg[:2]]
 
 
+# ---------------------------------------------------------------- coverage-gap audit
+# Starting-slot positions with no eligible backup beyond the projected
+# starters. TE base slots can only be filled by TEs, so a lone TE is a
+# structural gap: a late scratch is a forced zero (the Oct 16/17 Loveland
+# case — flagged by hand twice before this was mechanized). RB/WR/TE
+# share the flex pool, so the pool check is eligible-vs-slots across all
+# three. K/DEF are excluded (the forced-replacement path owns the
+# hurt-unit case; small-league streaming owns the rest) and QB depth is
+# owned by the roster-context veto (the Lock lesson). Skipped entirely in
+# wire-rich leagues (<=6 teams): the wire replaces a scratch the same
+# morning. Bye-week overlap is intentionally out of scope — G9 owns it.
+
+def coverage_gaps(bypos, base_slots, flex_slots, injury_of, num_teams):
+    """Return a list of gap dicts: {pos, starter, inj}.
+
+    pos is "TE" or "FLEX-POOL"; starter is the lone starter's name (or
+    None when no TE is rostered at all); inj is the lone starter's live
+    injury designation ("" when clean) — any designation at all counts
+    as exposed, Questionable included.
+    """
+    gaps = []
+    if num_teams <= 6:
+        return gaps
+    flex_pool = ("RB", "WR", "TE")
+    tes = sorted(bypos.get("TE", []), key=lambda x: -x["val"])
+    if len(tes) <= base_slots.get("TE", 0):
+        starter = tes[0] if tes else None
+        inj = injury_of(starter["id"]) if starter else ""
+        gaps.append({"pos": "TE",
+                     "starter": starter["name"] if starter else None,
+                     "inj": inj or ""})
+    eligible = sum(len(bypos.get(p, [])) for p in flex_pool)
+    slots = sum(base_slots.get(p, 0) for p in flex_pool) + flex_slots
+    if eligible <= slots:
+        gaps.append({"pos": "FLEX-POOL", "starter": None, "inj": "",
+                     "detail": (f"only {eligible} RB/WR/TE for "
+                                f"{slots} slots")})
+    return gaps
+
+
 # ---------------------------------------------------------------- G7 schedule-luck audit
 
 def schedule_luck(matchups_by_week, records):
