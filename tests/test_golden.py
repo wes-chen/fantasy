@@ -1961,6 +1961,33 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: #29 DEF line names the unit, never a bare abbrev",
           not re.search(r"^  DEF: \([A-Z]{2,3}\)", _def29),
           f"line: {_def29[:80]!r}")
+    # coverage-gap audit (2026-10-18): a starting-slot position with no
+    # eligible backup. In the 4-team league the wire replaces a scratch
+    # the same morning, so the audit stays silent there; in the 14-team
+    # league a printed TE gap line must match the roster's actual TE
+    # count (<= base TE slots), and vice versa.
+    _te_line = next((ln for ln in _ros29.splitlines()
+                     if ln.startswith("  TE: ")), "")
+    _te_names = [n.strip() for n in
+                 _te_line.split("  TE: ", 1)[1].split(", ") if n.strip()]
+    _te_slots_m = re.search(r"'TE': (\d+)", out)
+    _te_slots = int(_te_slots_m.group(1)) if _te_slots_m else 1
+    _te_gap_printed = any(ln.startswith("  coverage gap: TE")
+                          for ln in _ros29.splitlines())
+    if tag == "weekend-warriors":
+        check(f"{tag}: coverage audit silent in wire-rich league",
+              "coverage gap:" not in out, "gap line printed in 4-team")
+    else:
+        check(f"{tag}: TE gap printed iff TEs <= base TE slots",
+              _te_gap_printed == (len(_te_names) <= _te_slots),
+              f"TEs={_te_names} slots={_te_slots} "
+              f"gap_printed={_te_gap_printed}")
+        if _te_gap_printed and len(_te_names) == 1:
+            check(f"{tag}: TE gap line names the lone TE",
+                  _te_names[0].split("(")[0] in next(
+                      ln for ln in _ros29.splitlines()
+                      if ln.startswith("  coverage gap: TE")),
+                  f"TEs={_te_names}")
     check(f"{tag}: swaps sorted by delta (ADV-FF-15)",
           "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===" in out)
     check(f"{tag}: trade-lock boundary line (ADV-FF-14)",
@@ -2430,6 +2457,70 @@ else:
           all("<-- CRATER (2+ starters out)" in _ln for _ln in _G9
               if re.search(r"\(([2-9]\d*) starters:", _ln)),
           f"section: {_G9}")
+
+# --- coverage-gap audit (2026-10-18): starting-slot positions with no
+# eligible backup. The Oct 16/17 Loveland case: a lone TE is a forced zero
+# on a late scratch — flagged by hand twice before being mechanized.
+def _cg_bp(te_n, rb_n=4, wr_n=5, te_inj=""):
+    # defaults keep the flex pool healthy (10 eligible for 8 slots) so
+    # the TE-side assertions isolate; thin-pool fixtures override rb/wr.
+    bp = {"TE": [{"id": f"t{i}", "name": f"TE{i}", "pos": "TE",
+                  "val": 200 - 10 * i} for i in range(te_n)],
+          "RB": [{"id": f"r{i}", "name": f"RB{i}", "pos": "RB", "val": 100}
+                 for i in range(rb_n)],
+          "WR": [{"id": f"w{i}", "name": f"WR{i}", "pos": "WR", "val": 100}
+                 for i in range(wr_n)]}
+    inj = {f"t{i}": te_inj for i in range(te_n)}
+    return bp, (lambda sid: inj.get(str(sid), "")), \
+        {"QB": 2, "RB": 2, "WR": 3, "TE": 1}, 2
+
+
+_bp1, _inj1, _bs1, _fx1 = _cg_bp(1)
+_g1 = fi.coverage_gaps(_bp1, _bs1, _fx1, _inj1, 14)
+check("coverage: lone TE -> one TE gap, starter named, not exposed",
+      len(_g1) == 1 and _g1[0]["pos"] == "TE"
+      and _g1[0]["starter"] == "TE0" and _g1[0]["inj"] == "",
+      f"gaps={_g1}")
+_bp2, _inj2, _bs2, _fx2 = _cg_bp(1, te_inj="Questionable")
+_g2 = fi.coverage_gaps(_bp2, _bs2, _fx2, _inj2, 14)
+check("coverage: lone Questionable TE -> exposed",
+      len(_g2) == 1 and _g2[0]["inj"] == "Questionable",
+      f"gaps={_g2}")
+_bp0, _inj0, _bs0, _fx0 = _cg_bp(0)
+_g0 = fi.coverage_gaps(_bp0, _bs0, _fx0, _inj0, 14)
+check("coverage: zero TEs rostered -> gap with no starter",
+      len(_g0) == 1 and _g0[0]["pos"] == "TE"
+      and _g0[0]["starter"] is None,
+      f"gaps={_g0}")
+_bp3, _inj3, _bs3, _fx3 = _cg_bp(2)
+check("coverage: 2 TEs for 1 slot -> no TE gap",
+      not [g for g in fi.coverage_gaps(_bp3, _bs3, _fx3, _inj3, 14)
+           if g["pos"] == "TE"])
+_bp4, _inj4, _bs4, _fx4 = _cg_bp(1)
+check("coverage: 4-team league skips the audit (wire is an ocean)",
+      fi.coverage_gaps(_bp4, _bs4, _fx4, _inj4, 4) == [])
+# flex pool: 1 RB + 1 WR + 2 TE = 4 eligible for 2+3+1 base + 2 flex = 8
+# slots -> pool gap fires, TE side stays quiet (2 TEs for 1 slot).
+_bpp, _injp, _bsp, _fxp = _cg_bp(2, rb_n=1, wr_n=1)
+_gp = fi.coverage_gaps(_bpp, _bsp, _fxp, _injp, 14)
+check("coverage: thin flex pool -> FLEX-POOL gap with counts",
+      len(_gp) == 1 and _gp[0]["pos"] == "FLEX-POOL"
+      and "4" in _gp[0]["detail"] and "8" in _gp[0]["detail"],
+      f"gaps={_gp}")
+_bph, _injh, _bsh, _fxh = _cg_bp(2)
+check("coverage: healthy flex pool -> no pool gap",
+      not [g for g in fi.coverage_gaps(_bph, _bsh, _fxh, _injh, 14)
+           if g["pos"] == "FLEX-POOL"])
+# gap-close tag predicate: same-position drops close nothing; pool gaps
+# are depth problems, not single-add closes.
+check("coverage: ADD TE / DROP WR closes the TE gap",
+      tb.closes_coverage_gap("TE", "WR", {"TE"}) is True)
+check("coverage: ADD TE / DROP TE closes nothing",
+      tb.closes_coverage_gap("TE", "TE", {"TE"}) is False)
+check("coverage: no gap -> no tag",
+      tb.closes_coverage_gap("TE", "WR", set()) is False)
+check("coverage: FLEX-POOL never takes the close tag",
+      tb.closes_coverage_gap("FLEX-POOL", "WR", {"FLEX-POOL"}) is False)
 
 print()
 if failures:
