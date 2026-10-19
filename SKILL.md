@@ -92,7 +92,13 @@ API, so Rumi adds a row when Wesley says he filed a claim; the section
 prints each claim's live resolution — CLEARED on his roster, FAILED on
 another manager's roster, else expected clear — and claimed players carry
 [CLAIM-PENDING] on FA lines and are never re-recommended as ADDs, the
-Oct 13-16 Chase lesson),
+Oct 13-16 Chase lesson), a `=== PLANNED MOVES ===` section (chat-driven
+`planned_moves.md` registry — Rumi adds a row when Wesley states a plan,
+e.g. "ADD Sadiq / DROP McLaughlin if Judkins active"; each open plan prints
+with its live status — OPEN / EXECUTED / FAILED / STALE — and a suggested
+move that deviates from a plan (same ADD, different DROP) carries a
+PLAN NOTE naming both drops — the engine never silently switches a planned
+drop, the Oct 16-18 Sadiq lesson),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
@@ -222,6 +228,11 @@ be redundant):
      A player carrying the engine's [CLAIM-PENDING] tag has a claim you
      already know about (pending_claims.md) — never re-recommend the ADD
      and never price the priority slot twice.
+     Never switch a planned drop silently (planned_moves.md): if the
+     engine's suggestion deviates from Wesley's stated plan, name the
+     deviation on the move (the engine prints a PLAN NOTE itself) and ask
+     which drop to keep — the Oct 16-18 Sadiq case (plan: DROP McLaughlin;
+     board: DROP Perine, unnamed) is the standing example of the trap.
      Read the engine's slot-check line before ever writing "no drop
      needed": it validates live active-vs-max math with the reserve
      overlap subtracted. IR-move advice must first pass the engine's
