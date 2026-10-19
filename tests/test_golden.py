@@ -2353,6 +2353,208 @@ _push_src = open(os.path.join(SKILL, "bin", "push_to_github.py")).read()
 check("pending claims: registry is local-only, never in the push file set",
       "pending_claims" not in _push_src)
 
+# ---------------- planned moves: empty registry -> silent ----------------
+_pm_empty = tb.load_planned_moves(os.path.join(SKILL, "planned_moves.md"))
+if _pm_empty:
+    print("  (planned_moves.md has live rows — skipping empty-registry check)")
+else:
+    check("snapusa: empty plan registry -> no PLANNED MOVES section",
+          "=== PLANNED MOVES" not in out)
+
+# ---------------- planned moves: unit ----------------
+_pm_fixture = (
+    "# comment\n"
+    "\n"
+    "101|Addsynth One|WR|202|Dropsynth One|RB|2026-10-16|snapusa|"
+    "if Judkins active Sun|chat 10/16|open\n"
+    "102|Addsynth Two|TE|203|Dropsynth Two|RB|2026-10-16|ww||chat 10/16|open\n"
+    "103|Addsynth Three|RB|204|Dropsynth Three|WR|2026-10-16||"
+    "no league tag|chat 10/16|open\n"
+    "104|Addsynth Old|WR|205|Dropsynth Old|RB|2026-10-01|snapusa|"
+    "|done long ago|resolved\n"
+    "105|Too|Few|Cols\n"
+)
+with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as _fh:
+    _fh.write(_pm_fixture)
+    _pm_tmp = _fh.name
+try:
+    _pm_all = tb.load_planned_moves(_pm_tmp)
+    check("planned moves: unscoped load keeps only open rows",
+          set(_pm_all) == {"101", "102", "103"})
+    _pm_sn = tb.load_planned_moves(_pm_tmp, "snapusa")
+    check("planned moves: snapusa scope = snapusa row + untagged row",
+          set(_pm_sn) == {"101", "103"})
+    _pm_ww = tb.load_planned_moves(_pm_tmp, "ww")
+    check("planned moves: ww scope = ww row + untagged row",
+          set(_pm_ww) == {"102", "103"})
+    _p101 = _pm_sn["101"]
+    check("planned moves: row fields parsed",
+          _p101["add_name"] == "Addsynth One" and _p101["add_pos"] == "WR"
+          and _p101["drop_pid"] == "202" and _p101["drop_name"] == "Dropsynth One"
+          and _p101["drop_pos"] == "RB" and _p101["date"] == "2026-10-16"
+          and _p101["league"] == "snapusa"
+          and _p101["condition"] == "if Judkins active Sun"
+          and _p101["notes"] == "chat 10/16")
+    check("planned moves: missing file -> empty dict",
+          tb.load_planned_moves(_pm_tmp + ".nonexistent") == {})
+finally:
+    os.unlink(_pm_tmp)
+
+# plan_status on synthetic roster maps (my_rid=7).
+_syn_owner = {"101": 7, "102": 3, "104": None}
+try:
+    del _syn_owner["104"]
+except KeyError:
+    pass
+_syn_r2n = {3: "rival_mgr", 7: "wesley"}
+_syn_plan = {"drop_pid": "202"}
+check("plan_status: ADD on my roster -> executed",
+      tb.plan_status("101", _syn_plan, {"202", "303"}, _syn_owner, 7,
+                     _syn_r2n) == ("executed", None))
+check("plan_status: ADD on another roster -> failed with manager name",
+      tb.plan_status("102", _syn_plan, {"202"}, _syn_owner, 7,
+                     _syn_r2n) == ("failed", "rival_mgr"))
+check("plan_status: ADD on another roster (str owner key) -> failed",
+      tb.plan_status("102", _syn_plan, {"202"}, {"102": "3"}, "7",
+                     _syn_r2n) == ("failed", "rival_mgr"))
+check("plan_status: drop gone from my roster -> stale",
+      tb.plan_status("103", _syn_plan, {"303"}, {}, 7, _syn_r2n)
+      == ("stale", "planned DROP no longer on your roster"))
+check("plan_status: live plan -> open",
+      tb.plan_status("103", _syn_plan, {"202", "303"}, {}, 7, _syn_r2n)
+      == ("open", None))
+
+# attach_plan_note: the Oct 16-18 Sadiq lesson — never switch a planned
+# drop silently.
+_syn_plans = {"501": {"add_name": "Addsynth Five", "add_pos": "TE",
+                      "drop_pid": "601", "drop_name": "Dropsynth Five",
+                      "drop_pos": "RB", "condition": "if Judkins active Sun",
+                      "notes": "", "league": "snapusa", "date": "2026-10-16"}}
+_base_line = "  ADD Addsynth Five (TE,260) / DROP Other Guy (RB,120) [FA NOW]"
+check("attach_plan_note: no plan -> line unchanged",
+      tb.attach_plan_note(_base_line, "999", "602", _syn_plans) == _base_line)
+check("attach_plan_note: matching drop -> line unchanged, no PLAN NOTE",
+      "PLAN NOTE" not in tb.attach_plan_note(_base_line, "501", "601",
+                                              _syn_plans))
+_note = tb.attach_plan_note(_base_line, "501", "602", _syn_plans)
+check("attach_plan_note: deviating drop -> PLAN NOTE names plan drop",
+      "PLAN NOTE" in _note and "Dropsynth Five (RB)" in _note
+      and "say which to keep" in _note)
+check("attach_plan_note: condition carried on the note",
+      "if Judkins active Sun" in _note)
+_no_cond = dict(_syn_plans["501"]); _no_cond["condition"] = ""
+check("attach_plan_note: empty condition -> no dangling parens",
+      "()" not in tb.attach_plan_note(_base_line, "501", "602",
+                                       {"501": _no_cond}))
+
+# ---------------- planned moves: fixture-swap end-to-end ----------------
+# The real planned_moves.md is local-only (never pushed) and currently
+# empty (no live plans). Swap in a synthetic fixture built from live
+# roster data, run the board, assert the section/status/PLAN NOTE, then
+# restore byte-identical.
+_pm_file = os.path.join(SKILL, "planned_moves.md")
+_pm_orig = (open(_pm_file).read() if os.path.exists(_pm_file) else None)
+_pm_players = {}
+try:
+    _pm_players = json.load(open(os.path.expanduser(
+        "~/workspace/sleeper/players.json")))
+except Exception:
+    _pm_players = {}
+try:
+    _pm_rosters = json.loads(_urlreq.urlopen(
+        f"https://api.sleeper.app/v1/league/{SNAPUSA}/rosters",
+        timeout=30).read().decode())
+    _pm_ww_rosters = json.loads(_urlreq.urlopen(
+        f"https://api.sleeper.app/v1/league/{WW}/rosters",
+        timeout=30).read().decode())
+    _pm_mine = next(r for r in _pm_rosters if r.get("owner_id") == ME)
+    _pm_bench = [str(p) for p in (_pm_mine.get("players") or [])]
+    _pm_rostered = {str(p) for r in _pm_rosters + _pm_ww_rosters
+                    for p in ((r.get("players") or [])
+                              + (r.get("reserve") or []))}
+    def _pm_name(pid):
+        return (_pm_players.get(str(pid), {}) or {}).get("full_name",
+                                                          f"player-{pid}")
+    # Case A (executed): plan ADD is a player on Wesley's own roster.
+    _pm_add, _pm_drop = _pm_bench[0], _pm_bench[1]
+    with open(_pm_file, "w") as _fh:
+        _fh.write(
+            f"{_pm_add}|{_pm_name(_pm_add)}|RB|{_pm_drop}|"
+            f"{_pm_name(_pm_drop)}|RB|2026-10-19|snapusa||test fixture|open\n")
+    _pm_out = run_board(SNAPUSA).stdout
+    check("planned moves: section renders with executed plan",
+          "=== PLANNED MOVES" in _pm_out
+          and _pm_name(_pm_add) in _pm_out
+          and "EXECUTED" in _pm_out)
+    check("planned moves: executed plan -> no spurious PLAN NOTE",
+          "PLAN NOTE" not in _pm_out)
+    # Case B (open): plan ADD is a genuine free agent (in neither league).
+    _pm_fa = next((pid for pid, pl in _pm_players.items()
+                   if pid not in _pm_rostered
+                   and (pl.get("position") or "") == "TE"
+                   and (pl.get("active") or False)), None)
+    if _pm_fa is None:
+        print("  SKIP planned moves: no free-agent TE found in players cache")
+    else:
+        with open(_pm_file, "w") as _fh:
+            _fh.write(
+                f"{_pm_fa}|{_pm_name(_pm_fa)}|TE|{_pm_drop}|"
+                f"{_pm_name(_pm_drop)}|RB|2026-10-19|snapusa|"
+                f"if active|test fixture|open\n")
+        _pm_out2 = run_board(SNAPUSA).stdout
+        check("planned moves: open plan renders with OPEN status",
+              "=== PLANNED MOVES" in _pm_out2
+              and _pm_name(_pm_fa) in _pm_out2 and ": OPEN" in _pm_out2)
+    # Case C (deviation): plan ADD = the engine's own suggested ADD, plan
+    # DROP = a different bench player -> the move must carry PLAN NOTE.
+    # Case D (match): same plan with the engine's actual DROP -> no note.
+    _pm_sug = next((ln for ln in _pm_out.splitlines()
+                    if re.match(r"\s*ADD .+? \((QB|RB|WR|TE),", ln)), "")
+    _m_add = re.match(r"\s*ADD (.+?) \((QB|RB|WR|TE),", _pm_sug)
+    _m_drop = re.search(r"/ DROP (.+?) \([A-Z]+,\d+\)", _pm_sug)
+    _pm_name2id = {}
+    for _pid, _pl in _pm_players.items():
+        _fn = (_pl.get("full_name") or "").strip()
+        if _fn and _fn not in _pm_name2id:
+            _pm_name2id[_fn] = _pid
+    if not (_m_add and _m_drop and _m_add.group(1).strip() in _pm_name2id
+            and _m_drop.group(1).strip() in _pm_name2id):
+        print("  SKIP planned moves: could not map suggested ADD/DROP to ids")
+    else:
+        _pm_add_id = _pm_name2id[_m_add.group(1).strip()]
+        _pm_drop_id = _pm_name2id[_m_drop.group(1).strip()]
+        _pm_alt_drop = next(b for b in _pm_bench if b != _pm_drop_id)
+        with open(_pm_file, "w") as _fh:
+            _fh.write(
+                f"{_pm_add_id}|{_m_add.group(1).strip()}|{_m_add.group(2)}|"
+                f"{_pm_alt_drop}|{_pm_name(_pm_alt_drop)}|RB|2026-10-19|"
+                f"snapusa||test fixture|open\n")
+        _pm_out3 = run_board(SNAPUSA).stdout
+        check("planned moves: deviating drop -> PLAN NOTE on the move",
+              "PLAN NOTE" in _pm_out3
+              and _pm_name(_pm_alt_drop) in _pm_out3)
+        with open(_pm_file, "w") as _fh:
+            _fh.write(
+                f"{_pm_add_id}|{_m_add.group(1).strip()}|{_m_add.group(2)}|"
+                f"{_pm_drop_id}|{_m_drop.group(1).strip()}|RB|2026-10-19|"
+                f"snapusa||test fixture|open\n")
+        _pm_out4 = run_board(SNAPUSA).stdout
+        check("planned moves: matching drop -> no PLAN NOTE",
+              "=== PLANNED MOVES" in _pm_out4
+              and "PLAN NOTE" not in _pm_out4)
+finally:
+    if _pm_orig is None:
+        if os.path.exists(_pm_file):
+            os.unlink(_pm_file)
+    else:
+        with open(_pm_file, "w") as _fh:
+            _fh.write(_pm_orig)
+    check("planned moves: registry restored byte-identical after test",
+          (_pm_orig is None and not os.path.exists(_pm_file))
+          or open(_pm_file).read() == _pm_orig)
+check("planned moves: registry is local-only, never in the push file set",
+      "planned_moves" not in _push_src)
+
 out_ww = run_board(WW).stdout
 # NF-01: slot values reset weekly in Sleeper — assert the line's internal
 # consistency (SCARCE iff slot <= 3) instead of a hardcoded slot number.
