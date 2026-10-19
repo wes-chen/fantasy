@@ -541,6 +541,82 @@ def claim_resolution(pid, my_rid, owner_of, rid2name):
     return ("failed", rid2name.get(int(owner), "?"))
 
 
+def load_planned_moves(path, league=None):
+    """Wesley's chat-stated fantasy plans (e.g. "ADD Sadiq / DROP McLaughlin,
+    if Judkins active" — chat 2026-10-16). Returns {add_pid: info} for
+    status=open rows. Chat-driven write path like pending_claims.md: the
+    engine never edits the registry; chat marks rows resolved when the
+    plan settles.
+
+    Row format:
+      add_pid | add_name | add_pos | drop_pid | drop_name | drop_pos |
+      date | league | condition | notes | status
+    status: open (any other status is resolved history — ignored).
+    league: short tag ("snapusa"/"ww") scoping per league (gh #26 logic,
+    same as pending claims/offers)."""
+    plans = {}
+    try:
+        fh = open(path)
+    except FileNotFoundError:
+        return plans
+    for line in fh:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 11 or parts[10].lower() != "open":
+            continue
+        row_league = (parts[7].lower()
+                      if parts[7].lower() in ("snapusa", "ww") else None)
+        if league is not None and row_league is not None and row_league != league:
+            continue
+        plans[parts[0]] = {"add_name": parts[1], "add_pos": parts[2],
+                           "drop_pid": parts[3], "drop_name": parts[4],
+                           "drop_pos": parts[5], "date": parts[6],
+                           "league": row_league,
+                           "condition": parts[8], "notes": parts[9]}
+    return plans
+
+
+def plan_status(add_pid, plan, my_ids, owner_of, my_rid, rid2name):
+    """Classify an open plan against live rosters. Returns (state, extra):
+    ("executed", None) — the ADD is on his roster (the move happened; chat
+    settles the registry row);
+    ("failed", manager) — the ADD landed on another manager's roster;
+    ("stale", what) — the planned DROP is no longer on his roster, so the
+    plan's drop is moot (the ADD may still be wanted — re-plan the drop);
+    ("open", None) — plan still live.
+    Pure: the board prints this; chat edits the registry."""
+    owner = owner_of.get(str(add_pid))
+    if owner is not None and str(owner) == str(my_rid):
+        return ("executed", None)
+    if owner is not None:
+        try:
+            who = rid2name.get(int(owner), "?")
+        except (TypeError, ValueError):
+            who = "?"
+        return ("failed", who)
+    if str(plan["drop_pid"]) not in my_ids:
+        return ("stale", "planned DROP no longer on your roster")
+    return ("open", None)
+
+
+def attach_plan_note(line, add_pid, drop_pid, plans):
+    """Append a deviation note to a suggested-move line when the engine's
+    DROP for a planned ADD differs from Wesley's stated plan. Returns the
+    line unchanged when no open plan covers the ADD or the drops match —
+    the standing rule is "never switch a planned drop silently, name the
+    change" (Oct 16-18 Sadiq/McLaughlin -> Perine case), so a deviation
+    always names both drops and asks which to keep."""
+    plan = plans.get(str(add_pid))
+    if not plan or str(drop_pid) == str(plan["drop_pid"]):
+        return line
+    cond = f" ({plan['condition']})" if plan["condition"] else ""
+    return (line + f" — PLAN NOTE: your stated plan{cond} was DROP "
+            f"{plan['drop_name']} ({plan['drop_pos']}) instead; "
+            f"say which to keep")
+
+
 def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
                my_lineup_dval, my_lineup, my_lineup_ids, fp):
     """Lineup-points delta of the 1-for-1 swap for you: who starts, who sits.
@@ -934,6 +1010,13 @@ def main():
     claims_path = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "pending_claims.md"))
     claims = load_pending_claims(claims_path, league_tag(a.league))
+    # --- Wesley's chat-stated plans (invisible to the Sleeper API). The
+    # engine never silently switches a planned drop: open plans print in
+    # === PLANNED MOVES === with their live status, and a suggested move
+    # that deviates from a plan carries a PLAN NOTE naming both drops.
+    plans_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "planned_moves.md"))
+    plans = load_planned_moves(plans_path, league_tag(a.league))
 
     def pname(pid):
         # #29: DEFs render as "San Francisco 49ers DEF", not a bare "SF"
@@ -1789,6 +1872,40 @@ def main():
                       + (f" ({_c['notes']})" if _c["notes"] else ""))
         print()
 
+    # Wesley's chat-stated plans (chat-driven planned_moves.md). The board
+    # never edits the registry — chat marks rows resolved — and it never
+    # silently switches a planned drop: each open plan prints with its live
+    # status, and a suggested move that deviates from a plan carries a
+    # PLAN NOTE on the move line (Oct 16-18 Sadiq lesson: the plan was DROP
+    # McLaughlin, the board suggested DROP Perine without saying so).
+    if plans:
+        print("=== PLANNED MOVES (your stated plans — engine notes deviations, never edits) ===")
+        _my_ids = set()
+        for _r in rosters:
+            if str(_r.get("owner_id")) == str(a.me):
+                _my_ids = {str(p) for p in (_r.get("players") or [])}
+                _my_ids |= {str(p) for p in (_r.get("reserve") or [])}
+                break
+        for _aid, _p in plans.items():
+            _st, _ex = plan_status(_aid, _p, _my_ids, owner_of, my_rid,
+                                   rid2name)
+            _lg = f" [{_p['league']}]" if _p["league"] else ""
+            _cond = f" — if: {_p['condition']}" if _p["condition"] else ""
+            if _st == "executed":
+                _st_txt = "EXECUTED (ADD on your roster — chat can resolve)"
+            elif _st == "failed":
+                _st_txt = f"FAILED — ADD now on {_ex}'s roster"
+            elif _st == "stale":
+                _st_txt = f"STALE — {_ex} (re-plan the drop)"
+            else:
+                _st_txt = "OPEN"
+            print(f"  ADD {_p['add_name']} ({_p['add_pos']}) / "
+                  f"DROP {_p['drop_name']} ({_p['drop_pos']}) — "
+                  f"planned {_p['date']}{_cond}: {_st_txt}"
+                  + (_lg if _lg else "")
+                  + (f" ({_p['notes']})" if _p["notes"] else ""))
+        print()
+
     # E14 follow-up: slot math must be known BEFORE suggestions emit — on a
     # FULL roster the DROP must be an active player, since dropping an
     # IR/reserve occupant frees no active bench slot.
@@ -1851,11 +1968,13 @@ def main():
                 if cur_inj in HURT:
                     # forced replacement: a hurt starter must be replaced —
                     # edge is 0 but NF-01 never flags a forced move
+                    _ln = (f"  ADD {_fan} ({pos}) / "
+                           f"DROP {cur['name']} ({pos}) — "
+                           f"your {pos} is {cur_inj}"
+                           + _pathtag(_p, _fapid))
                     sug.append((0, 0, cur["val"], True, _fapid, _p,
-                                f"  ADD {_fan} ({pos}) / "
-                                f"DROP {cur['name']} ({pos}) — "
-                                f"your {pos} is {cur_inj}"
-                                + _pathtag(_p, _fapid)))
+                                attach_plan_note(_ln, _fapid, cur["id"],
+                                                 plans)))
                 else:
                     _fa_rank = kdef_fp.get(_fapid)
                     _cur_rank = kdef_fp.get(cur["id"])
@@ -1866,11 +1985,13 @@ def main():
                         # The rank-delta edge joins the hold-vs-spend
                         # median; K/DEF upgrades are rare enough not to
                         # move it.
+                        _ln = (f"  ADD {_fan} ({pos},FP-ROS #{_fa_rank}) / "
+                               f"DROP {cur['name']} ({pos},FP-ROS #{_cur_rank})"
+                               + _pathtag(_p, _fapid))
                         sug.append((_cur_rank - _fa_rank, 0, 0, False,
                                     _fapid, _p,
-                                    f"  ADD {_fan} ({pos},FP-ROS #{_fa_rank}) / "
-                                    f"DROP {cur['name']} ({pos},FP-ROS #{_cur_rank})"
-                                    + _pathtag(_p, _fapid)))
+                                    attach_plan_note(_ln, _fapid, cur["id"],
+                                                     plans)))
             continue
         fav, fan, fainj, fapid = fa_by_pos[pos][0]
         if fav <= 0 or fainj in HURT:
@@ -1892,10 +2013,11 @@ def main():
                            if closes_coverage_gap(pos, b["pos"],
                                                   _cov_gap_poses)
                            else "")
+                _ln = (f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
+                       f"DROP {b['name']} ({b['pos']},{b['val']})"
+                       + _pathtag(_p, fapid) + _closes)
                 sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
-                            f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
-                            f"DROP {b['name']} ({b['pos']},{b['val']})"
-                            + _pathtag(_p, fapid) + _closes))
+                            attach_plan_note(_ln, fapid, b["id"], plans)))
                 break
     sug.sort(key=lambda t: t[0], reverse=True)
     # E14: validate slot arithmetic before emitting — the 9/23 Rodgers
