@@ -175,7 +175,8 @@ def load_usage(stats_gz, snaps_csv):
             "games": 0, "targets": 0.0, "ts": 0.0, "ays": 0.0, "wopr": 0.0,
             "carries": 0.0, "tds": 0.0, "pts": 0.0, "rec_yards": 0.0,
             "air_yards": 0.0, "snap_sum": 0.0, "snap_n": 0, "week": 0,
-            "team": "", "name": "", "pos": ""})
+            "team": "", "name": "", "pos": "", "last_week": 0,
+            "last_touches": 0.0, "last_snap": 0.0})
 
     def num(v):
         try:
@@ -211,6 +212,9 @@ def load_usage(stats_gz, snaps_csv):
             if wk >= a["week"]:
                 a["week"] = wk
                 a["team"] = r.get("team") or a["team"]
+            if wk >= a["last_week"]:
+                a["last_week"] = wk
+                a["last_touches"] = num(r.get("carries")) + num(r.get("targets"))
             a["name"] = r.get("player_display_name") or a["name"]
             a["pos"] = pos
     with open(snaps_csv) as fh:
@@ -226,6 +230,13 @@ def load_usage(stats_gz, snaps_csv):
                 continue
             a["snap_sum"] += num(r.get("offense_pct"))
             a["snap_n"] += 1
+            try:
+                _wk = int(r.get("week") or 0)
+            except (TypeError, ValueError):
+                _wk = 0
+            if _wk >= a["last_week"]:
+                a["last_week"] = _wk
+                a["last_snap"] = num(r.get("offense_pct"))
     out = {}
     for k, a in agg.items():
         g = max(a["games"], 1)
@@ -241,6 +252,9 @@ def load_usage(stats_gz, snaps_csv):
             "ppg": a["pts"] / g,
             "offense_pct": (a["snap_sum"] / a["snap_n"]) if a["snap_n"] else 0.0,
             "racr": (a["rec_yards"] / a["air_yards"]) if a["air_yards"] else 0.0,
+            "last_week": a["last_week"],
+            "last_touches": a["last_touches"],
+            "last_snap": round(a["last_snap"], 2),
         }
     return out
 
@@ -308,6 +322,41 @@ def usage_gaps(usage, min_games=G1_MIN_GAMES):
     buys.sort(key=lambda d: -d["gap"])
     sells.sort(key=lambda d: d["gap"])
     return buys, sells
+
+# Last-game role shield (2026-10-19 Perine post-mortem): a bench player with
+# ~zero FantasyCalc value but a live role in his most recent game must not be
+# named as a waiver DROP. The G1 buy-low role floor is a season average
+# (10 carries/game for RBs), so a Week-5 timeshare breakout (Perine: 14
+# carries/68 yds + TD, 52% snaps) fell through every protection and the
+# board recommended dropping him twice — Wesley corrected it in chat.
+RECENT_ROLE_TOUCHES = 8    # last-game carries+targets implying a live role
+RECENT_ROLE_SNAP = 0.40    # last-game offensive snap share implying a live role
+RECENT_ROLE_WEEKS_AGO = 2  # shield expires after this many weeks without a game
+
+
+def recent_role_shield(usage, nfl_week, max_weeks_ago=RECENT_ROLE_WEEKS_AGO):
+    """{nkey} whose most recent nflverse week shows a live role (G1 add-on).
+
+    Live role = last-game touches >= RECENT_ROLE_TOUCHES or snap share >=
+    RECENT_ROLE_SNAP, pos in (RB, WR, TE), games >= G1_MIN_GAMES, and the
+    game was within max_weeks_ago of nfl_week (the 2-week window covers one
+    bye week). Injury status is NOT checked here — the call site applies
+    the same injured-player veto as G1 (an Out/IR player whose last game
+    was big is a stale signal, not a live role).
+    """
+    out = set()
+    for nkey, u in (usage or {}).items():
+        if u.get("pos") not in ("RB", "WR", "TE"):
+            continue
+        if (u.get("games") or 0) < G1_MIN_GAMES:
+            continue
+        lw = u.get("last_week") or 0
+        if lw < nfl_week - max_weeks_ago:
+            continue
+        if (u.get("last_touches") or 0) >= RECENT_ROLE_TOUCHES or \
+           (u.get("last_snap") or 0) >= RECENT_ROLE_SNAP:
+            out.add(nkey)
+    return out
 
 # ---------------------------------------------------------------- G2 manager trade profiles
 
