@@ -1446,6 +1446,7 @@ def main():
     print("  routes are unavailable in every free source — target share + "
           "air-yards share + snap% are the route proxies, never synthesized")
     buy_low_sids = set()  # stashed for the G8 clog audit
+    recent_sids = set()   # last-game role shield, same consumer
     try:
         if nfl_err or not nfl_usage:
             raise RuntimeError(nfl_err or "no usage rows")
@@ -1462,6 +1463,20 @@ def main():
         _my = {x["id"] for lst in me["bypos"].values() for x in lst}
         buy_low_sids = {sid_of_nkey(b["nkey"]) for b in _buys}
         buy_low_sids.discard(None)
+        # Last-game role shield (2026-10-19 Perine post-mortem): G1's buy-low
+        # role floor is a season average (10 carries/game for RBs), so a
+        # one-game timeshare breakout on a ~zero-value bench player fell
+        # through every protection and the board named him as a waiver drop
+        # twice. recent_role_shield catches that case on last-game usage;
+        # the same injured-player veto as G1 keeps it off dead players.
+        _rec_kept, _, _ = g1_veto_injured(
+            [{"nkey": _nk}
+             for _nk in fi.recent_role_shield(nfl_usage, nfl_week)],
+            [],
+            lambda _nk: ((players.get(str(sid_of_nkey(_nk)), {}) or {})
+                         .get("injury_status") or ""))
+        recent_sids = {sid_of_nkey(_r["nkey"]) for _r in _rec_kept}
+        recent_sids.discard(None)
         _hold = [b for b in _buys if sid_of_nkey(b["nkey"]) in _my][:4]
         _shop = [s for s in _sells if sid_of_nkey(s["nkey"]) in _my][:4]
         _tgt, _wire = [], []
@@ -1916,6 +1931,10 @@ def main():
     # hurt-starter backup / rising usage / on-block). The audit
     # recomputes these sets for display below; this is the same
     # membership, applied to the drop pool before suggestions emit.
+    # The last-game role shield (G1 add-on) is included: a bench player
+    # whose most recent game shows a live role (touches/snap) is not a
+    # safe drop even when his season average and FC value are ~zero
+    # (2026-10-19 Perine post-mortem).
     # K/DEF keep their own pool (G6 is RB-only, G1 never flags K/DEF).
     try:
         _prot = {b["sid"] for h in hm_cache for b in h["backups"]
@@ -1928,6 +1947,7 @@ def main():
                     _prot.add(str(_b["id"]))
                     break
         _prot |= {str(s) for s in buy_low_sids}
+        _prot |= {str(s) for s in recent_sids}
         _prot |= {str(s) for s in onblock}
     except Exception:  # noqa: BLE001 — degrade to the old legal-only pool
         _prot = set()
@@ -2065,12 +2085,13 @@ def main():
                         break
         _ranked, _drops = fi.clog_audit(
             _ball, handcuff_of=_hcuff, ahead_out=_ahead,
-            rising={s: True for s in buy_low_sids},
+            rising={s: True for s in (buy_low_sids | recent_sids)},
             onblock=set(onblock))
         for _r in _ranked[:6]:
             _tags = ("[handcuff]" if _r["sid"] in _hcuff else "") + \
                     ("[ahead-out]" if _r["sid"] in _ahead else "") + \
-                    ("[rising]" if _r["sid"] in buy_low_sids else "")
+                    ("[rising]" if _r["sid"] in buy_low_sids else "") + \
+                    ("[recent-role]" if _r["sid"] in recent_sids else "")
             print(f"    {_r['name']} ({_r['pos']},{_r['val']} -> "
                   f"contingent {_r['contingent']}){_tags}")
         if _drops:
