@@ -88,7 +88,9 @@ droppable bench with every ADD tagged [FA NOW] (instant add, no
 priority cost) or [CLAIM — clears <run>, burns #N] from recent
 drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18 —
 the clear time is the observed per-league waiver run (ADV-FF-20):
-snapusa clears Wed 11:00pm PT, weekend warriors clears Tue ~12:02am PT;
+snapusa clears ~12:05am Tuesday PT (verified Oct 20 — Monday-night claims processed Tue 00:05);
+weekend warriors clears midnight end of Monday into Tuesday PT (weekly run).
+Mid-week claims on dropped players follow their own 2-day cooldown, not the weekly run;
 a player dropped within the last ~2 days clears on his own drop-cooldown
 schedule instead — Sleeper's waiver_day_of_week field still claims a
 Monday/Tuesday clear), a `=== PENDING CLAIMS ===` section (chat-driven
