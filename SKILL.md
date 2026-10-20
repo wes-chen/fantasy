@@ -35,7 +35,12 @@ section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated R
 (G1 — nflverse usage vs fantasy output: buy-low/sell-high on target
 share, air-yards share, snap%; routes are unavailable in every free
 source and are never synthesized; players flagged Out/IR/Doubtful/
-Suspended are excluded from the radar entirely (#28)), candidate swaps ranked by projected
+Suspended are excluded from the radar entirely (#28); a last-game
+role shield (G1 add-on, 2026-10-19 Perine post-mortem) also protects
+bench players whose most recent game shows a live role (>=8
+touches or >=40% snaps) from being named as waiver drops — a season
+average can't see a one-game timeshare breakout on a ~zero-value
+player, and the board named Perine as a drop twice before the fix), candidate swaps ranked by projected
 lineup-points delta for him (the marginal gain to *his* optimal starting
 lineup by FantasyCalc redraft value, not the smallest value gap —
 each row carries a fairness band on the value gap: <10% EXCELLENT,
@@ -100,7 +105,8 @@ move that deviates from a plan (same ADD, different DROP) carries a
 PLAN NOTE naming both drops — the engine never silently switches a planned
 drop, the Oct 16-18 Sadiq lesson),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
-hurt-starter backups, rising-usage players, and unpriced players (K/DEF,
+hurt-starter backups, rising-usage players, last-game-role players (see
+G1 above), and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
 named as drops; the suggested ADD/DROP pairs draw their DROP from the
 same protected pool, so the two sections never disagree on who is
