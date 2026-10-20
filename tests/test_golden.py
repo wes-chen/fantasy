@@ -688,6 +688,77 @@ check("waiver_drop_pool: all protected -> no suggestion drop",
       tb.waiver_drop_pool(_bench, [], drop_needed=False,
                           protected_ids={"8205", "9221", "6819"}) == [])
 
+# G1 last-game role shield (2026-10-19 Perine post-mortem): a bench player
+# with ~zero FC value but a live role in his most recent game must not be
+# named as a waiver DROP. Perine (Week 5: 14 carries, 52% snaps, season
+# average far below the G1 buy-low role floor) fell through every
+# protection and the board suggested him as a drop twice — Wesley
+# corrected it in chat. The shield fires on last-game touches/snap; the
+# call site applies the same injured-player veto as G1 (#28).
+def _sh_u(pos, games, last_week, last_touches, last_snap):
+    return {"pos": pos, "games": games, "last_week": last_week,
+            "last_touches": last_touches, "last_snap": last_snap}
+
+_SHIELD_USAGE = {
+    ("samaje perine", "CIN", "RB"): _sh_u("RB", 5, 5, 14.0, 0.52),  # live case
+    ("wr snaps", "X", "WR"): _sh_u("WR", 6, 6, 5.0, 0.41),          # snap path
+    ("rb eight", "X", "RB"): _sh_u("RB", 6, 6, 8.0, 0.20),          # touch bndry
+    ("rb seven", "X", "RB"): _sh_u("RB", 6, 6, 7.0, 0.39),          # below both
+    ("te bye", "X", "TE"): _sh_u("TE", 6, 5, 12.0, 0.60),           # 1 bye ago
+    ("rb stale", "X", "RB"): _sh_u("RB", 6, 2, 14.0, 0.52),         # 5 wks ago
+    ("te new", "X", "TE"): _sh_u("TE", 1, 6, 12.0, 0.60),           # <2 games
+    ("qb starter", "X", "QB"): _sh_u("QB", 6, 6, 0.0, 0.75),        # QB excluded
+}
+_SHIELD_HIT = {("samaje perine", "CIN", "RB"), ("wr snaps", "X", "WR"),
+               ("rb eight", "X", "RB"), ("te bye", "X", "TE")}
+
+check("recent_role_shield: live case + boundaries (nfl_week=7)",
+      fi.recent_role_shield(_SHIELD_USAGE, 7) == _SHIELD_HIT)
+check("recent_role_shield: empty/None usage -> empty set",
+      fi.recent_role_shield({}, 7) == set()
+      and fi.recent_role_shield(None, 7) == set())
+check("recent_role_shield: snap 0.40 boundary is shielded",
+      fi.recent_role_shield({("w", "X", "WR"): _sh_u("WR", 3, 6, 2.0, 0.40)},
+                            6) == {("w", "X", "WR")})
+check("recent_role_shield: thresholds exposed as module constants",
+      fi.RECENT_ROLE_TOUCHES == 8 and fi.RECENT_ROLE_SNAP == 0.40
+      and fi.RECENT_ROLE_WEEKS_AGO == 2)
+check("recent_role_shield: call-site veto shape (nkey-only dicts through "
+      "g1_veto_injured) drops Out players",
+      tb.g1_veto_injured([{"nkey": ("a",)}, {"nkey": ("b",)}], [],
+                         lambda nk: "Out" if nk == ("a",) else "")[0]
+      == [{"nkey": ("b",)}])
+
+# load_usage: last-week usage tracks the most recent game row (stats +
+# snaps files), not the season average — the shield's input. A two-week
+# fixture where week 6 is quieter than week 5 must report week 6.
+_STATS_CSV = ("player_display_name,team,position,week,season_type,carries,"
+              "targets,passing_yards,passing_tds,passing_interceptions,"
+              "rushing_yards,rushing_tds,rushing_fumbles_lost,receptions,"
+              "receiving_yards,receiving_tds,receiving_fumbles_lost,"
+              "receiving_air_yards,target_share,air_yards_share,wopr,"
+              "passing_2pt_conversions,rushing_2pt_conversions,"
+              "receiving_2pt_conversions\n"
+              "Shield Test,CIN,RB,5,REG,14,2,0,0,0,68,1,0,2,10,0,0,20,0.05,"
+              "0.02,0.09,0,0,0\n"
+              "Shield Test,CIN,RB,6,REG,3,1,0,0,0,12,0,0,1,8,0,0,15,0.03,"
+              "0.01,0.05,0,0,0\n")
+_SNAP_CSV = ("player,team,position,week,season_type,offense_pct\n"
+             "Shield Test,CIN,RB,5,REG,0.52\n"
+             "Shield Test,CIN,RB,6,REG,0.20\n")
+with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as _sf, \
+     tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as _nf:
+    _sf.write(_STATS_CSV)
+    _nf.write(_SNAP_CSV)
+    _sp, _np = _sf.name, _nf.name
+_shl = fi.load_usage(_sp, _np)[("shield test", "CIN", "RB")]
+check("load_usage: last_week/last_touches/last_snap track the newest row",
+      _shl["last_week"] == 6 and _shl["last_touches"] == 4.0
+      and _shl["last_snap"] == 0.20 and _shl["games"] == 2
+      and _shl["carries_pg"] == 8.5)
+os.unlink(_sp)
+os.unlink(_np)
+
 # ---------------- NF-01: waiver priority cost model ----------------
 _fake_rosters = [
     {"owner_id": "aaa", "roster_id": 1,
@@ -2124,13 +2195,16 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           all("UNPROTECTED" in ln for ln in _freelines),
           f"unflagged: {[ln for ln in _freelines if 'UNPROTECTED' not in ln]}")
     # G8: rows carry contingent values, and every rendered tag names one
-    # of the three contingencies (handcuff / hurt-ahead / rising).
+    # of the four contingencies (handcuff / hurt-ahead / rising /
+    # recent-role). The vocabulary is pinned so a misspelled or unnamed
+    # tag can't drift in silently; a deliberate new contingency (like the
+    # 2026-10-19 last-game role shield) moves the pin with it.
     _g8sec = out.split("roster-clog audit (G8")[1].split("===")[0]
     check(f"{tag}: G8 rows rank by contingent value",
           re.search(r" -> contingent [\d.]+\)", _g8sec) is not None)
     _g8tags = set(re.findall(r"\[[a-z-]+\]", _g8sec))
     check(f"{tag}: G8 contingency tags use the named vocabulary",
-          _g8tags <= {"[handcuff]", "[ahead-out]", "[rising]"},
+          _g8tags <= {"[handcuff]", "[ahead-out]", "[rising]", "[recent-role]"},
           f"tags: {_g8tags}")
     check(f"{tag}: G3 trending velocity line",
           "trending velocity (Sleeper-wide adds" in out)
