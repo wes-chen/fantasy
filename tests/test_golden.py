@@ -2798,6 +2798,79 @@ check("coverage: no gap -> no tag",
 check("coverage: FLEX-POOL never takes the close tag",
       tb.closes_coverage_gap("FLEX-POOL", "WR", {"FLEX-POOL"}) is False)
 
+# ---------------- value divergence: injury veto ----------------
+# 2026-10-21: the divergence section flagged Davante Adams (Sleeper Out,
+# ruptured hamstring) CALC HIGHER on a pre-injury FantasyCalc number —
+# the same staleness artifact G1's veto (#28) already excludes. The veto
+# covers Out/IR/Doubtful/Suspended (the HURT set); Questionable stays
+# flaggable, like the waiver injury veto.
+_dv_bypos = {
+    "WR": [
+        {"id": "dv_out", "name": "Out Player", "pos": "WR", "val": 1500},
+        {"id": "dv_ir", "name": "IR Player", "pos": "WR", "val": 1500},
+        {"id": "dv_q", "name": "Questionable Player", "pos": "WR",
+         "val": 1500},
+        {"id": "dv_ok", "name": "Healthy Player", "pos": "WR", "val": 1500},
+        {"id": "dv_small", "name": "Small Diff Player", "pos": "WR",
+         "val": 1500},
+        {"id": "dv_noecr", "name": "No ECR Player", "pos": "WR", "val": 1500},
+    ],
+}
+_dv_fp = {
+    "dv_out": (11, 148, 60), "dv_ir": (11, 148, 60),
+    "dv_q": (11, 148, 60), "dv_ok": (11, 60, 60),
+    "dv_small": (11, 100, 60), "dv_noecr": (None, None, None),
+}
+_dv_fval = {k: (1500, 0, 75, 0, False) for k in _dv_fp}
+_dv_fval["dv_ok"] = (1500, 0, 148, 0, False)      # |148-60| = 88 -> ECR HIGHER
+_dv_fval["dv_small"] = (1500, 0, 105, 0, False)   # |105-100| = 5 < 12
+_dv_fval["dv_noecr"] = (1500, 0, 999, 0, False)   # unpriced -> skipped
+_dv_players = {
+    "dv_out": {"injury_status": "Out"},
+    "dv_ir": {"injury_status": "IR"},
+    "dv_q": {"injury_status": "Questionable"},
+    "dv_ok": {"injury_status": None},
+    "dv_small": {"injury_status": None},
+    "dv_noecr": {"injury_status": None},
+}
+_dv_lines, _dv_excl = tb.value_divergences(
+    _dv_bypos, _dv_fp, _dv_fval, _dv_players, {"WR": 2})
+check("divergence: Out player excluded (staleness artifact)",
+      not any("Out Player" in ln for ln in _dv_lines) and _dv_excl == 2,
+      f"lines={_dv_lines} excl={_dv_excl}")
+check("divergence: IR player excluded too",
+      not any("IR Player" in ln for ln in _dv_lines))
+check("divergence: Questionable player still flagged",
+      any("Questionable Player" in ln and "CALC HIGHER" in ln
+          for ln in _dv_lines))
+check("divergence: healthy player flagged with ECR-HIGHER label",
+      any("Healthy Player" in ln and "ECR HIGHER" in ln
+          for ln in _dv_lines),
+      f"lines={_dv_lines}")
+check("divergence: sub-threshold diff skipped silently",
+      not any("Small Diff Player" in ln for ln in _dv_lines)
+      and _dv_excl == 2)
+check("divergence: missing ECR / unpriced skipped, not counted",
+      not any("No ECR Player" in ln for ln in _dv_lines)
+      and _dv_excl == 2)
+_dv_lines2, _dv_excl2 = tb.value_divergences(
+    {"WR": [{"id": "dv_ok", "name": "Healthy Player", "pos": "WR",
+             "val": 1500}]},
+    {"dv_ok": (11, 148, 60)},
+    {"dv_ok": (1500, 0, 75, 0, False)},
+    {"dv_ok": {"injury_status": None}}, {"WR": 2})
+check("divergence: no exclusions -> count 0",
+      _dv_excl2 == 0 and len(_dv_lines2) == 1)
+# string-keyed players map tolerance (Sleeper players.json is str-keyed)
+_dv_lines3, _dv_excl3 = tb.value_divergences(
+    {"WR": [{"id": 2133, "name": "Int Key Player", "pos": "WR",
+             "val": 1500}]},
+    {2133: (11, 148, 60)},
+    {2133: (1500, 0, 75, 0, False)},
+    {"2133": {"injury_status": "Out"}}, {"WR": 2})
+check("divergence: int player id still matches str-keyed players map",
+      _dv_lines3 == [] and _dv_excl3 == 1)
+
 print()
 if failures:
     print(f"{len(failures)} FAILURES: {failures}")
