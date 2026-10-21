@@ -617,6 +617,43 @@ def attach_plan_note(line, add_pid, drop_pid, plans):
             f"say which to keep")
 
 
+def value_divergences(bypos, fp, fval, players, eff_slots):
+    """Value-divergence flags: FantasyPros ECR rank vs FantasyCalc rank.
+
+    Returns (lines, injured_excluded): the top-10 flag strings plus a
+    count of divergent players skipped by the injury veto. An Out/IR/
+    Doubtful/Suspended player's two feeds reprice the same injury news
+    on different schedules, so a |diff| >= 12 there is a staleness
+    artifact, not a signal — the same veto G1 applies (#28, ADV-FF-19).
+    The 2026-10-21 case: Davante Adams (ruptured hamstring, Sleeper Out)
+    flagged CALC HIGHER on a pre-injury FantasyCalc number. Questionable
+    stays flaggable (same as the waiver injury veto)."""
+    divs = []
+    excluded = 0
+    for p in eff_slots:
+        for x in bypos.get(p, []):
+            _, ecr, _ = fp.get(x["id"], (None, None, None))
+            fcovr = fval.get(x["id"], (0, 999, 999, 0, False))[2]
+            if not ecr or fcovr >= 999:
+                continue
+            inj = ((players.get(str(x["id"])) or {}).get("injury_status")
+                   or "")
+            d = fcovr - ecr
+            if abs(d) < 12:
+                continue
+            if inj in HURT:
+                excluded += 1
+                continue
+            lbl = ("ECR HIGHER (calc undervalues: hold / buy-low window)"
+                   if d >= 12 else
+                   "CALC HIGHER (sell-high candidate)")
+            divs.append((abs(d),
+                         f"  {x['name']}: ECR {ecr} vs FC #{fcovr}"
+                         f" -> {lbl}"))
+    lines = [ln for _, ln in sorted(divs, reverse=True)[:10]]
+    return lines, excluded
+
+
 def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
                my_lineup_dval, my_lineup, my_lineup_ids, fp):
     """Lineup-points delta of the 1-for-1 swap for you: who starts, who sits.
@@ -1420,25 +1457,16 @@ def main():
     print()
     print("=== VALUE DIVERGENCE (FantasyPros ECR rank vs FantasyCalc rank) ===")
     if fp:
-        divs = []
-        for p in eff_slots:
-            for x in me["bypos"].get(p, []):
-                _, ecr, _ = fp.get(x["id"], (None, None, None))
-                fcovr = fval.get(x["id"], (0, 999, 999, 0, False))[2]
-                if not ecr or fcovr >= 999:
-                    continue
-                d = fcovr - ecr
-                if abs(d) >= 12:
-                    lbl = ("ECR HIGHER (calc undervalues: hold / buy-low window)"
-                           if d >= 12 else
-                           "CALC HIGHER (sell-high candidate)")
-                    divs.append((abs(d),
-                                 f"  {x['name']}: ECR {ecr} vs FC #{fcovr}"
-                                 f" -> {lbl}"))
-        for _, line in sorted(divs, reverse=True)[:10]:
-            print(line)
-        if not divs:
+        _div_lines, _div_excl = value_divergences(
+            me["bypos"], fp, fval, players, eff_slots)
+        for _ln in _div_lines:
+            print(_ln)
+        if not _div_lines:
             print("  (no major divergences on your roster)")
+        if _div_excl:
+            print(f"  ({_div_excl} divergent player(s) excluded: injured — "
+                  "divergence on injury news is a repricing artifact, "
+                  "not a signal)")
     else:
         print("  (skipped: no FantasyPros data)")
     print()
