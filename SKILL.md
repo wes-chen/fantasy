@@ -31,7 +31,7 @@ worse, and a waiver suggestion that closes a gap is tagged
 `[closes TE coverage gap]`), a 4-week bye-crater forecast (G9 —
 2+ projected starters on the same bye flagged), a value-divergence
 section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated ROS feed only, never draft ranks (gh #24); |diff|
->= 12 spots flagged as hold/buy-low or sell-high), a usage-gap radar
+>= 12 spots flagged as hold/buy-low or sell-high; players flagged Out/IR/Doubtful/Suspended are excluded with a count — the two feeds reprice the same injury news on different schedules, so a divergence there is a staleness artifact, not a signal (the 2026-10-21 Adams case; same veto as G1 #28)), a usage-gap radar
 (G1 — nflverse usage vs fantasy output: buy-low/sell-high on target
 share, air-yards share, snap%; routes are unavailable in every free
 source and are never synthesized; players flagged Out/IR/Doubtful/
