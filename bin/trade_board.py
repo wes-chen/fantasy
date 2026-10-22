@@ -176,20 +176,21 @@ def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
         return "claim"
     return "fa"
 
-# ADV-FF-20 (corrected 2026-10-16): the league's real waiver-run time, from
-# live observation. snapusa: Wesley confirmed 2026-10-14 ("yeah that waiver
-# is running at wed 11pm") after the Chase triple-nudge fiasco, and his
-# Roman Wilson claim cleared at the Wednesday 11:00pm PT run that night.
-# weekend warriors: live transaction history shows processed claims on
-# Tuesdays at ~12:02am PT (verified 9/22, 9/29, 10/6) — the 2026-10-15
-# ADV-FF-20 change wrongly pinned Wednesday for both leagues.
+# ADV-FF-20 (corrected 2026-10-16; superseded for snapusa 2026-10-20): the
+# league's real waiver-run time, from live observation. snapusa: the Oct 14
+# "yeah that waiver is running at wed 11pm" confirmation and Roman Wilson's
+# Wed 11:00pm PT clear were superseded 2026-10-20 — Wesley's Monday-night
+# claims processed Tue ~00:05 PT and his app screenshot reads "Runs at
+# Tuesday 12:05am". weekend warriors: live transaction history shows
+# processed claims on Tuesdays at ~12:02am PT (verified 9/22, 9/29, 10/6) —
+# the 2026-10-15 ADV-FF-20 change wrongly pinned Wednesday for both leagues.
 # Sleeper's waiver_day_of_week field still reads 1 (Monday), which the old
 # code mapped to "clears Tue 12:00am PT" — that mapping is stale and no
 # longer trusted. If a claim ever clears at a different time, update this
 # table: the golden tests pin the labels, so drift trips a test instead
 # of him.
 WAIVER_RUN_LABEL = {
-    "1320161122837368832": "clears Wed 11:00pm PT",   # snapusa
+    "1320161122837368832": "clears ~12:05am Tue PT",  # snapusa
     "1379714328738955264": "clears Tue ~12:02am PT",  # weekend warriors
 }
 
