@@ -559,10 +559,12 @@ check("acquisition_path: never dropped -> fa",
 check("acquisition_path: bad waiver_clear_days falls back to 2",
       tb.acquisition_path("p1", {"p1": _NOW - 1 * 86400 * 1000},
                           None, _NOW) == "claim")
-check("clear_label: snapusa -> observed Wed 11pm PT run (ADV-FF-20)",
+check("clear_label: snapusa -> observed ~12:05am Tue PT run (ADV-FF-20, "
+      "superseded 2026-10-20: Mon-night claims processed Tue 00:05; app "
+      "reads 'Runs at Tuesday 12:05am')",
       tb.clear_label({"league_id": "1320161122837368832",
                       "settings": {"waiver_day_of_week": 1}})
-      == "clears Wed 11:00pm PT")
+      == "clears ~12:05am Tue PT")
 check("clear_label: weekend warriors -> observed Tue ~12:02am PT run "
       "(2026-10-15 correction: live tx history 9/22, 9/29, 10/6)",
       tb.clear_label({"league_id": "1379714328738955264",
@@ -578,7 +580,7 @@ check("clear_label: None league -> unverified, no crash",
 check("clear_label: table has both leagues pinned (tripwire against drift)",
       set(tb.WAIVER_RUN_LABEL) == {"1320161122837368832",
                                    "1379714328738955264"}
-      and "Wed 11:00pm PT" in tb.WAIVER_RUN_LABEL["1320161122837368832"]
+      and "~12:05am Tue" in tb.WAIVER_RUN_LABEL["1320161122837368832"]
       and "Tue" in tb.WAIVER_RUN_LABEL["1379714328738955264"])
 # claim_eta (2026-10-16): a player dropped inside the waiver-clear window
 # clears ~waiver_clear_days after the drop on his own schedule (the
@@ -2386,7 +2388,7 @@ try:
           "=== PENDING CLAIMS (your open claims" in _out)
     check("pending claims: still-FA claim shows expected weekly clear",
           re.search(r"Synthetic Pending \(WR\): filed 2026-10-17 — expected "
-                    r"clears Wed 11:00pm PT, burns #\d+ \[snapusa\]",
+                    r"clears ~12:05am Tue PT, burns #\d+ \[snapusa\]",
                     _out) is not None, _out[-800:])
     check("pending claims: claim on his roster -> CLEARED",
           "Mine Player (RB): claim CLEARED — on your roster [snapusa]" in _out)
