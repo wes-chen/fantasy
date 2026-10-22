@@ -228,7 +228,7 @@ be redundant):
      every ADD before naming the move: FA NOW is instant and costs no
      priority; a CLAIM burns his waiver slot — price the slot only for
      claims (his 9/23 ruling). The clear time is per-league (snapusa:
-     Wed 11:00pm PT; weekend warriors: Tue ~12:02am PT), and a player
+     ~12:05am Tue PT (verified Oct 20); weekend warriors: Tue ~12:02am PT), and a player
      dropped within the last ~2 days clears on his own drop-cooldown
      schedule (observed: Chase dropped Tue 10/13 ~1pm PT, cleared Thu
      ~12pm PT, ~47h — never waited for the weekly run) — do NOT quote
