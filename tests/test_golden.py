@@ -408,6 +408,35 @@ check("ir_line: open IR shows dash names, no warning",
       tb.ir_line([], 1, 0) == "  IR: \u2014 (0/1 used, 1 open)")
 check("ir_line: no IR slots -> no FULL warning",
       "IR FULL" not in tb.ir_line([], None, 0))
+# E13 add-on (2026-10-23): IR-slot misuse — healthy occupant in reserve.
+_pl = {"1": {"injury_status": "", "full_name": "A.J. Brown", "position": "WR"},
+       "2": {"injury_status": "Out", "full_name": "D. Adams", "position": "WR"},
+       "3": {"injury_status": "Questionable", "full_name": "K. Shakir", "position": "WR"},
+       "4": {"injury_status": "Suspended", "full_name": "R. Rice", "position": "WR"}}
+check("invalid_ir_occupants: healthy occupant flagged",
+      tb.invalid_ir_occupants(["1"], _pl) == ["1"])
+check("invalid_ir_occupants: Out/IR/Doubtful/Suspended occupants pass",
+      tb.invalid_ir_occupants(["2", "4"], _pl) == [])
+check("invalid_ir_occupants: Questionable occupant NOT flagged (no false alarm)",
+      tb.invalid_ir_occupants(["3"], _pl) == [])
+check("invalid_ir_occupants: empty reserve -> []",
+      tb.invalid_ir_occupants([], _pl) == [])
+check("invalid_ir_occupants: unknown pid (no DB row) counts as no designation",
+      tb.invalid_ir_occupants(["9"], _pl) == ["9"])
+check("invalid_ir_occupants: None reserve -> []",
+      tb.invalid_ir_occupants(None, _pl) == [])
+_mis = tb.ir_line(["A.J. Brown"], 1, 1, invalid=["A.J. Brown"])
+check("ir_line: misuse warning names the player, keeps FULL warning",
+      "IR SLOT MISUSE" in _mis and "A.J. Brown" in _mis and "IR FULL" in _mis)
+check("ir_line: misuse singular grammar",
+      "has no injury designation" in _mis and "sits in the IR slot" in _mis)
+_mis2 = tb.ir_line(["A", "B"], 2, 2, invalid=["A", "B"])
+check("ir_line: misuse plural grammar",
+      "have no injury designation" in _mis2 and "sit in the IR slot" in _mis2)
+check("ir_line: no misuse -> byte-identical to old 3-arg form",
+      tb.ir_line(["Isiah Pacheco"], 1, 1) == tb.ir_line(["Isiah Pacheco"], 1, 1, invalid=[]))
+check("ir_line: empty invalid tuple -> no MISUSE text",
+      "IR SLOT MISUSE" not in tb.ir_line([], 1, 0, invalid=()))
 
 # ---------------- E15: IR stash hunt ------------------------------------
 _E15_PLAYERS = {
