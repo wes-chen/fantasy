@@ -66,7 +66,11 @@ there), hole-creating options it refuses to price
 on its own, a handcuff leverage map (G6 — each of his RBs' direct backup
 and who holds him: mine/free/opponent), an IR-slot audit (E13 — used/open
 IR capacity from Sleeper's reserve_slots with a full-IR warning, since the
-next injury then costs an active roster spot), an IR stash hunt (E15 —
+next injury then costs an active roster spot; plus an IR-slot misuse flag —
+a reserve occupant with no injury designation (a healthy player squatting in the
+IR slot — the 2026-10-18 WW case, an ACTIVE A.J. Brown on a full roster
+silently blocking all adds) is named with a move-back-to-bench note;
+Questionable occupants are never flagged), an IR stash hunt (E15 —
 wire scan for IR/Out free agents with meaningful FantasyCalc value,
 gated on an open IR slot; the deliberate exception to the injury veto —
 added precisely because they're injured, to stash in IR; 14-team only,
