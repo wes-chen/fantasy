@@ -408,7 +408,27 @@ def ir_capacity(reserve_slots, reserve_count):
     return slots, max(slots - used, 0)
 
 
-def ir_line(ir_names, reserve_slots, reserve_count):
+def invalid_ir_occupants(reserve_ids, players):
+    """IR-slot misuse audit (E13 add-on): reserve occupants with NO injury
+    designation on record.
+
+    Sleeper's IR slot is for Out/IR/Doubtful/Suspended players (the HURT
+    taxonomy); a healthy player squatting in reserve wastes the slot. On
+    2026-10-18 Wesley's weekend-warriors roster had an ACTIVE A.J. Brown
+    sitting in the IR slot on a full 16/16 roster, silently blocking all
+    adds/claims until flagged by hand. Questionable occupants are NOT
+    flagged (Sleeper IR eligibility for Q varies by league setup, and the
+    waiver veto treats Q as playable — no false alarms). Returns the pid
+    strings of the invalid occupants; the call site maps them to names.
+    """
+    bad = []
+    for pid in (reserve_ids or []):
+        if not (((players.get(str(pid), {}) or {}).get("injury_status")) or ""):
+            bad.append(str(pid))
+    return bad
+
+
+def ir_line(ir_names, reserve_slots, reserve_count, invalid=()):
     """Roster-audit IR line with capacity and a full-IR warning (E13)."""
     slots, open_ = ir_capacity(reserve_slots, reserve_count)
     names = ", ".join(ir_names) if ir_names else "\u2014"
@@ -416,6 +436,14 @@ def ir_line(ir_names, reserve_slots, reserve_count):
     if slots and open_ == 0:
         s += (" — IR FULL: the next injury costs an ACTIVE roster spot; "
               "injured stashes can't hide here")
+    if invalid:
+        n = len(invalid)
+        s += (f" — IR SLOT MISUSE: {', '.join(invalid)} "
+              f"{'has' if n == 1 else 'have'} no injury designation on record "
+              f"but {'sits' if n == 1 else 'sit'} in the IR slot — move "
+              f"{'him' if n == 1 else 'them'} back to the bench so the slot is "
+              f"actually available for injuries (moving alone frees no active "
+              f"roster spot)")
     return s
 
 def count_flex_slots(roster_positions):
@@ -1414,7 +1442,17 @@ def main():
             print(f"  coverage gap: {_g['detail']} "
                   f"(any RB/WR/TE injury forces a zero)")
     if me["ir"] or ir_slots:
-        print(ir_line(me["ir"], ir_slots, len(me["ir"])))
+        # E13 add-on (2026-10-23): IR-slot misuse audit. Sleeper's IR slot is
+        # for Out/IR/Doubtful/Suspended players; a healthy occupant squats
+        # illegally in the slot — the 2026-10-18 weekend-warriors case (an
+        # ACTIVE A.J. Brown on a full 16/16 roster) silently blocked every
+        # add until flagged by hand. Same line, no new section header.
+        _my_roster = next((r for r in rosters
+                           if r.get("roster_id") == my_rid), None) or {}
+        _bad_ir = invalid_ir_occupants(
+            [str(x) for x in (_my_roster.get("reserve") or [])], players)
+        print(ir_line(me["ir"], ir_slots, len(me["ir"]),
+                      invalid=[pname(p) for p in _bad_ir]))
     print()
     if onblock:
         print("=== PENDING OFFERS (your open offers — ON-BLOCK: never propose) ===")
