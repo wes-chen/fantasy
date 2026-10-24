@@ -2034,6 +2034,43 @@ def run_board(league):
     return p
 
 
+def _suggested_moves_of(out):
+    """Waiver suggested moves only: the lines between "suggested moves:"
+    and the roster-clog audit inside the WAIVER WIRE section. Other
+    sections render ADD/DROP-shaped lines that are NOT suggestions —
+    the PLANNED MOVES registry prints Wesley's stated plans in
+    "ADD X / DROP Y — planned ..." form (2026-10-24: the executed CAR
+    DEF plan tripped the whole-output scan and falsely failed the
+    ADV-FF-18 tag rule). Scoping here keeps registry renderings from
+    ever counting as untagged suggestions again."""
+    _sl = out.splitlines()
+    try:
+        _si = next(i for i, ln in enumerate(_sl)
+                   if ln.strip() == "suggested moves:")
+        _ei = next(i for i, ln in enumerate(_sl)
+                   if ln.startswith("  roster-clog audit"))
+    except StopIteration:
+        return []
+    return [ln for ln in _sl[_si + 1:_ei]
+            if ln.startswith("  ADD ") and " / DROP " in ln]
+
+
+_synth_board = (
+    "=== WAIVER WIRE ===\n"
+    "  suggested moves:\n"
+    "  ADD A Player (RB,100) / DROP B Player (RB,50) [FA NOW — foo]\n"
+    "  roster-clog audit (G8: bench by contingent value):\n"
+    "=== PLANNED MOVES (your stated plans) ===\n"
+    "  ADD C Player (DEF) / DROP D Player (DEF) — planned 2026-10-23\n")
+check("ADV-FF-18 scope: planned-moves lines are not suggested moves",
+      _suggested_moves_of(_synth_board) == [
+          "  ADD A Player (RB,100) / DROP B Player (RB,50) [FA NOW — foo]"],
+      f"got {_suggested_moves_of(_synth_board)}")
+check("ADV-FF-18 scope: missing suggested-moves block -> no moves, "
+      "never a whole-output scan",
+      _suggested_moves_of("=== WAIVER WIRE ===\n  (no moves here)\n") == [])
+
+
 for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     p = run_board(league)
     out = p.stdout
@@ -2264,14 +2301,28 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
                     r"(FULL: every ADD needs a DROP|\d+ open bench "
                     r"slot\(s\))",
                     out) is not None)
-    _moves = [ln for ln in out.splitlines()
-              if ln.startswith("  ADD ") and " / DROP " in ln]
+    # ADV-FF-18 scope (2026-10-24): only the WAIVER WIRE suggested-moves
+    # block counts. The PLANNED MOVES registry renders stated plans in
+    # ADD/DROP form, and the old whole-output scan misread the executed
+    # CAR DEF plan as an untagged suggestion — a false red, not a
+    # missing tag. Registry renderings carry no acquisition tag by
+    # design (the move is already decided/executed, not proposed).
+    _moves = _suggested_moves_of(out)
     # A league can legitimately suggest no moves (rich wire, high churn
     # bar) — then the tag rule is vacuously satisfied.
     _untagged = [ln for ln in _moves
                  if not re.search(r"\[(FA NOW|CLAIM) —", ln)]
     check(f"{tag}: every suggested move has an FA NOW or CLAIM tag (ADV-FF-18)",
           not _untagged, f"untagged moves: {_untagged}")
+    # Live pin for the 2026-10-24 false red: any planned-moves ADD/DROP
+    # line present in this board must NOT appear in the scoped moves.
+    _planned_adds = [ln for ln in out.splitlines()
+                     if ln.startswith("  ADD ") and " / DROP " in ln
+                     and "planned " in ln]
+    check(f"{tag}: planned-moves lines excluded from suggested moves "
+          f"(2026-10-24)",
+          all(ln not in _moves for ln in _planned_adds),
+          f"planned lines leaked into _moves: {_planned_adds}")
     check(f"{tag}: CLAIM tag names clear time and slot (ADV-FF-18)",
           not any("[CLAIM" in ln for ln in _moves)
           or all("clears " in ln and "burns #" in ln
