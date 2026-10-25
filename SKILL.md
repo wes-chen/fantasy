@@ -20,7 +20,8 @@ actual), Wesley's roster by value (with FantasyPros bye weeks — 2+ players on 
 same bye carry a `[BYE-STACK W..]` warning right in the roster lines — and,
 from Week 5, G5 playoff-schedule tags `[P+]`/`[P-]` weighting the W15-17
 slate x0.9-1.1). K and DEF get their own roster lines, priced by
-FantasyPros ROS rank like the waiver lines; a defense renders as
+FantasyPros ROS rank like the waiver lines, with an [ON BYE W..] tag when
+the unit's bye is this week (#30); a defense renders as
 "San Francisco 49ers DEF" (Sleeper stores DEFs with full_name=None, and
 the old bare-abbrev fallback read as a missing defense in chat), a
 bye-week audit, a coverage-gap audit (14-team leagues only: starting-slot
@@ -79,7 +80,10 @@ free agents by position on FantasyCalc redraft value — K/DEF carry no FC
 value, so the top FA K/DEF lines print their FantasyPros ROS rank instead
 and the suggestion engine streams only decisive upgrades: a top-12 ROS
 unit 8+ ranks better than his current one, or a forced replacement when
-his unit is hurt (#20), trending velocity
+his unit is hurt (#20) or on bye this week (#30 — a bye-week unit scores
+zero; the replacement is the best-ranked healthy FA who is not on bye,
+any rank, and roster K/DEF lines carry [ON BYE W..] when the bye is this
+week), trending velocity
 (G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
 since the previous scan, from our own timestamped snapshot history:
 NEW/HEATING/COOLING), a slot-check line validating live roster math
