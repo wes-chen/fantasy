@@ -849,7 +849,10 @@ def get_fp_kdef(players):
     rejected, same as #24). Sleeper stores DEFs with full_name=None and
     the team abbrev as the player_id, so they are joined on
     "first_name last_name" (e.g. "Houston Texans"). Returns
-    {sleeper_id: ecr_rank}. Raises on fetch/parse failure; the caller
+    {sleeper_id: (ecr_rank, bye_week)} — the same pages carry
+    `player_bye_week` (#30), which the bye-week forced-replacement path
+    reads; bye_week is None when the page doesn't carry one (a few
+    kickers). Raises on fetch/parse failure; the caller
     degrades to {} and the K/DEF waiver branch keeps only the
     forced-replacement path.
     """
@@ -888,7 +891,11 @@ def get_fp_kdef(players):
         for pl in d.get("players") or []:
             sid = name2sid.get(norm_name(pl.get("player_name")))
             if sid and pl.get("rank_ecr"):
-                out[sid] = pl["rank_ecr"]
+                try:
+                    bye = int(pl.get("player_bye_week") or 0) or None
+                except (TypeError, ValueError):
+                    bye = None
+                out[sid] = (pl["rank_ecr"], bye)
     return out
 
 # K/DEF streaming gates (#20): only suggest a swap for a genuinely good
@@ -905,6 +912,26 @@ def kdef_upgrade_suggests(fa_rank, cur_rank):
     return bool(fa_rank and cur_rank
                 and fa_rank <= KDEF_STREAM_TOP
                 and fa_rank + KDEF_RANK_GAP <= cur_rank)
+
+
+def kdef_bye_replacement(fa_list, nfl_week, kdef_fp, kdef_byes):
+    """#30: forced-replacement pick when your K/DEF is on bye this week.
+
+    fa_list: [(value, name, inj, sid)] free agents at the position.
+    Returns the best healthy FA who is NOT on bye this week, ranked by
+    FantasyPros ROS rank (lowest first; unranked sort last, fa_list
+    order kept). None when every healthy FA is also on bye (or none
+    healthy) — the roster [ON BYE] tag still warns, but no swap is
+    named, because a bye-week FA scores zero too."""
+    cands = [t for t in fa_list
+             if t[2] not in HURT and kdef_byes.get(t[3]) != nfl_week]
+    if not cands:
+        return None
+
+    def _rank(t):
+        return kdef_fp.get(t[3], (None, None))[0]
+
+    return min(cands, key=lambda t: (_rank(t) is None, _rank(t) or 0))
 
 def main():
     ap = argparse.ArgumentParser()
@@ -987,11 +1014,14 @@ def main():
 
     # --- FantasyPros ROS ranks for K/DST (#20): the only price signal for
     # K/DEF, since FantasyCalc omits them. Degrades to {} — the waiver
-    # branch below then keeps only the forced-replacement path.
+    # branch below then keeps only the forced-replacement path. The same
+    # map carries bye weeks (#30): {sid: bye_week} for the on-bye roster
+    # tag and the bye-week forced-replacement suggestion.
     try:
         kdef_fp = get_fp_kdef(players)
     except Exception:
         kdef_fp = {}
+    kdef_byes = {sid: bye for sid, (_, bye) in kdef_fp.items() if bye}
 
     # --- nflverse bulk data: powers G1 (usage gaps), G5 (playoff SOS
     # weighting) and G6 (handcuff map). Cached 24h; every consumer below
@@ -1411,9 +1441,14 @@ def main():
     for p in ("K", "DEF"):
         pls = me["bypos"].get(p, [])
         def _kd_fmt(x):
-            _r = kdef_fp.get(x["id"])
+            _r = kdef_fp.get(x["id"], (None, None))[0]
+            # #30: a rostered K/DEF on bye this week scores zero — tag it
+            # at a glance, next to the bye-week info, not buried in the
+            # audit below (the Oct 23 JAX Week-7 bye was caught by hand).
+            _onbye = ("[ON BYE W%d]" % nfl_week
+                      if kdef_byes.get(x["id"]) == nfl_week else "")
             return (f"{x['name']}({'FP-ROS #' + str(_r) if _r else 'unpriced'})"
-                    f"{_btag(x)}{ptag_of(x['id'])}"
+                    f"{_btag(x)}{_onbye}{ptag_of(x['id'])}"
                     + ("[ON-BLOCK: pending offer to %s]"
                        % onblock[x["id"]]["partner"]
                        if x["id"] in onblock else ""))
@@ -1859,7 +1894,7 @@ def main():
             # FantasyPros ROS rank instead (#20); "unpriced" only when the
             # FP feed is unavailable this run.
             if pos in ("K", "DEF"):
-                _r = kdef_fp.get(pid_s)
+                _r = kdef_fp.get(pid_s, (None, None))[0]
                 val = f"FP-ROS #{_r}" if _r else "unpriced"
             else:
                 val = fstr(pid_s, v)
@@ -2043,9 +2078,13 @@ def main():
                          in fa_by_pos[pos] if i not in HURT), None)
             if mine and _hfa:
                 _, _fan, _, _fapid = _hfa
-                if _fapid in claims:
+                if _fapid in claims and kdef_byes.get(mine[0]["id"]) != nfl_week:
                     # pending-claim registry (Oct 13-16 Chase lesson): he
                     # already filed for this player — never re-recommend.
+                    # Exempt when his current unit is on bye this week:
+                    # the bye replacement is picked independently of the
+                    # top FA below, and its own claim status is checked
+                    # in the bye branch.
                     _claimed_skipped += 1
                     continue
                 cur = mine[0]
@@ -2062,9 +2101,31 @@ def main():
                     sug.append((0, 0, cur["val"], True, _fapid, _p,
                                 attach_plan_note(_ln, _fapid, cur["id"],
                                                  plans)))
+                elif kdef_byes.get(cur["id"]) == nfl_week:
+                    # #30: a K/DEF on bye scores zero but is neither hurt
+                    # nor a decisive-upgrade case, so the old code stayed
+                    # silent (the Oct 23 JAX Week-7 bye was handled by
+                    # hand). Forced replacement: the best healthy FA who
+                    # is NOT on bye this week, any rank. No fall-through
+                    # to the upgrade gate — a bye-week FA scores zero too.
+                    _rep = kdef_bye_replacement(fa_by_pos[pos], nfl_week,
+                                                kdef_fp, kdef_byes)
+                    if _rep and _rep[3] not in claims:
+                        _, _fan_b, _, _fapid_b = _rep
+                        _pb = _path(_fapid_b)
+                        _ln = (f"  ADD {_fan_b} ({pos}) / "
+                               f"DROP {cur['name']} ({pos}) — "
+                               f"your {pos} is on bye W{nfl_week} "
+                               f"(scores zero)"
+                               + _pathtag(_pb, _fapid_b))
+                        sug.append((0, 0, cur["val"], True, _fapid_b, _pb,
+                                    attach_plan_note(_ln, _fapid_b,
+                                                     cur["id"], plans)))
+                    elif _rep:
+                        _claimed_skipped += 1
                 else:
-                    _fa_rank = kdef_fp.get(_fapid)
-                    _cur_rank = kdef_fp.get(cur["id"])
+                    _fa_rank = kdef_fp.get(_fapid, (None, None))[0]
+                    _cur_rank = kdef_fp.get(cur["id"], (None, None))[0]
                     if kdef_upgrade_suggests(_fa_rank, _cur_rank):
                         # dropv 0: unpriced on both sides, so NF-01's
                         # scarce-slot veto (edge < X * dropv) can't fire —
