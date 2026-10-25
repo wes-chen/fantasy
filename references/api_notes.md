@@ -161,6 +161,22 @@ spirit, no rank-25-vs-rank-33 churn on the 14-team wire. A hurt current
 unit is always a forced replacement (top healthy FA, any rank). Degrades
 to forced-replacement-only when the FP fetch fails.
 
+### K/DEF bye-week forced replacement (#30, 2026-10-25)
+
+The same `ros-k.php`/`ros-dst.php` pages carry `player_bye_week` (a
+string; a few kickers omit it — reads None, never a phantom week).
+`get_fp_kdef()` now returns `{sid: (rank, bye_week)}`; the board derives
+`kdef_byes` from it. Sleeper's players DB carries no bye_week for K/DEF
+(verified 2026-10-25: 0/32 DEFs, 0/192 Ks), so FantasyPros is the only
+bye source here. A rostered K/DEF whose bye is the current NFL week
+scores zero but is neither hurt nor a decisive-upgrade case, so the old
+code stayed silent (the Oct 23 JAX Week-7 bye was handled by hand):
+now the roster line carries `[ON BYE W..]` and the waiver branch names a
+forced replacement — the best-ranked healthy FA who is NOT on bye this
+week, any rank (`kdef_bye_replacement()`). No fall-through to the
+upgrade gate: a bye-week FA scores zero too. When every healthy FA is
+also on bye, no swap is named — the tag still warns.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
