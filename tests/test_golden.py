@@ -142,11 +142,13 @@ finally:
 # ---------------- #20: FantasyPros ROS K/DST ranks (K/DEF price signal) ----
 _K_HTML = ("var ecrData = {\"ranking_type_name\":\"ros\",\"last_updated\":"
            "\"10\\/04\",\"players\":[{\"player_name\":\"Brandon Aubrey\","
-           "\"rank_ecr\":1},{\"player_name\":\"Chase McLaughlin\","
-           "\"rank_ecr\":25}]};\n")
+           "\"rank_ecr\":1,\"player_bye_week\":\"14\"},"
+           "{\"player_name\":\"Chase McLaughlin\","
+           "\"rank_ecr\":25,\"player_bye_week\":\"10\"}]};\n")
 _D_HTML = ("var ecrData = {\"ranking_type_name\":\"ros\",\"last_updated\":"
            "\"10\\/04\",\"players\":[{\"player_name\":\"Houston Texans\","
-           "\"rank_ecr\":2},{\"player_name\":\"New York Giants\","
+           "\"rank_ecr\":2,\"player_bye_week\":\"8\"},"
+           "{\"player_name\":\"New York Giants\","
            "\"rank_ecr\":24}]};\n")
 _D_DRAFT_HTML = ("var ecrData = {\"ranking_type_name\":\"draft\","
                  "\"last_updated\":\"8\\/01\",\"players\":[]};\n")
@@ -181,8 +183,10 @@ _saved_kd_urlopen = _urlreq.urlopen
 _urlreq.urlopen = _kd_urlopen()
 try:
     _kr = tb.get_fp_kdef(_kd_players)
-    check("#20: K ranks map by name, DEFs join on first+last name",
-          _kr == {"11533": 1, "99999": 25, "HOU": 2, "NYG": 24},
+    check("#20/#30: K/DST map is (rank, bye); DEFs join on first+last "
+          "name; a missing bye reads None, never a phantom week",
+          _kr == {"11533": (1, 14), "99999": (25, 10), "HOU": (2, 8),
+                  "NYG": (24, None)},
           f"got {_kr}")
     check("#20: non-K/DEF players are excluded from the rank map",
           "123" not in _kr)
@@ -217,6 +221,25 @@ check("#20: gate: outside top-12 / gap too small / missing ranks don't",
       and not tb.kdef_upgrade_suggests(2, 9)
       and not tb.kdef_upgrade_suggests(None, 24)
       and not tb.kdef_upgrade_suggests(2, None))
+
+# ---------------- #30: K/DEF bye-week forced replacement ----------------
+_kd_fa30 = [(0, "Alpha DEF", "", "D1"), (0, "Beta DEF", "Out", "D2"),
+            (0, "Gamma DEF", "", "D3"), (0, "Delta DEF", "", "D4")]
+_kd_fp30 = {"D1": (3, 8), "D2": (9, None), "D3": (20, None), "D4": (2, 9)}
+_kd_byes30 = {"D1": 8, "D4": 9}
+check("#30: bye replacement picks best-ranked healthy non-bye FA "
+      "(D4 rank 2 beats D3 rank 20; D1 on bye and hurt D2 skipped)",
+      tb.kdef_bye_replacement(_kd_fa30, 8, _kd_fp30, _kd_byes30)[3] == "D4")
+check("#30: bye replacement never names a bye-week or hurt FA",
+      tb.kdef_bye_replacement(_kd_fa30[:2], 8, _kd_fp30, _kd_byes30) is None)
+check("#30: unranked FA sorts behind ranked but is returned when alone",
+      tb.kdef_bye_replacement([(0, "Epsilon DEF", "", "D5")], 8, _kd_fp30,
+                              _kd_byes30)[3] == "D5")
+check("#30: all healthy FAs on bye -> None, never a zero-scoring swap",
+      tb.kdef_bye_replacement([(0, "Alpha DEF", "", "D1")], 8, _kd_fp30,
+                              _kd_byes30) is None)
+check("#30: empty FA list -> None",
+      tb.kdef_bye_replacement([], 8, _kd_fp30, _kd_byes30) is None)
 
 # ---------------- E5: season-timing injury discount ----------------
 _approx = lambda got, want: abs(got - want) < 1e-9
@@ -2100,6 +2123,45 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: #29 DEF line names the unit, never a bare abbrev",
           not re.search(r"^  DEF: \([A-Z]{2,3}\)", _def29),
           f"line: {_def29[:80]!r}")
+    # #30 live biconditional: [ON BYE W{n}] on a roster K/DEF line iff
+    # that unit's FantasyPros bye == the board's NFL week. Guarded: if
+    # the FP fetch fails here, the board's own feed failed too, so SKIP
+    # rather than fail on a degraded run.
+    try:
+        _wk_m30 = re.search(r"NFL Week (\d+)", out)
+        _wk30 = int(_wk_m30.group(1)) if _wk_m30 else None
+        if _wk30 is None:
+            raise ValueError("no NFL week in board header")
+        _pl30 = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _kd30 = tb.get_fp_kdef(_pl30)
+        _ros30 = tb.get(
+            f"https://api.sleeper.app/v1/league/{league}/rosters")
+        _my30 = next(r for r in _ros30 if r.get("owner_id") == ME)
+        _mine30 = {str(p) for p in _my30.get("players", [])}
+        _bad30 = []
+        for _sid, (_rank30, _bye30) in _kd30.items():
+            if _sid not in _mine30:
+                continue
+            _pos30 = (_pl30.get(_sid) or {}).get("position")
+            if _pos30 not in ("K", "DEF"):
+                continue
+            _line30 = _k29 if _pos30 == "K" else _def29
+            _units30 = _line30.split(f"  {_pos30}: ", 1)[1].split(", ")
+            _nm30 = fi.def_display_name(_sid, _pl30)
+            _unit30 = next((u for u in _units30
+                            if u.startswith(_nm30)), None)
+            if _unit30 is None:
+                _bad30.append(f"{_nm30} not on roster line")
+                continue
+            _tagged30 = f"[ON BYE W{_wk30}]" in _unit30
+            if _tagged30 != (_bye30 == _wk30):
+                _bad30.append(f"{_nm30} bye={_bye30} week={_wk30} "
+                              f"tagged={_tagged30}")
+        check(f"{tag}: #30 [ON BYE] tag iff rostered K/DEF bye == NFL week",
+              not _bad30, "; ".join(_bad30))
+    except Exception as _e30:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP #30 live bye-tag biconditional ({tag}): {_e30}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
