@@ -177,6 +177,20 @@ week, any rank (`kdef_bye_replacement()`). No fall-through to the
 upgrade gate: a bye-week FA scores zero too. When every healthy FA is
 also on bye, no swap is named — the tag still warns.
 
+### Suggested-move bye-week tag (2026-10-26)
+
+The mirror case #30 left open: the RECOMMENDED player on bye, not his
+own unit. The WAIVER WIRE top-FA lines already showed each FA's bye via
+`_btag`, but the suggested-move lines — the lines Wesley acts on — did
+not, so a Monday claim for a player who can't start Sunday hid the one
+fact that changes the claim decision. `on_bye_this_week_tag()` now
+appends `[ON BYE W.. — scores zero this week]` to every suggested ADD
+(skill positions via the FP overall feed's `player_bye_week`, K/DEF via
+`kdef_byes`) whose bye is the current NFL week. Tag only, never a
+veto or a reselection: unlike the K/DEF replacement case, a bye-week
+skill player can still be the right claim for rest-of-season value —
+the tag prices the week, it doesn't kill the move.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
