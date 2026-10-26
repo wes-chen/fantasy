@@ -83,7 +83,11 @@ unit 8+ ranks better than his current one, or a forced replacement when
 his unit is hurt (#20) or on bye this week (#30 — a bye-week unit scores
 zero; the replacement is the best-ranked healthy FA who is not on bye,
 any rank, and roster K/DEF lines carry [ON BYE W..] when the bye is this
-week), trending velocity
+week); and the mirror case — a suggested ADD who is himself on bye this
+week carries [ON BYE W.. — scores zero this week] on the move line, so a
+Monday claim for a player who can't start Sunday says so (tag only, never
+a veto: the player can still be the right claim for rest-of-season value),
+trending velocity
 (G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
 since the previous scan, from our own timestamped snapshot history:
 NEW/HEATING/COOLING), a slot-check line validating live roster math
