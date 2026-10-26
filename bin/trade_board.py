@@ -933,6 +933,26 @@ def kdef_bye_replacement(fa_list, nfl_week, kdef_fp, kdef_byes):
 
     return min(cands, key=lambda t: (_rank(t) is None, _rank(t) or 0))
 
+
+def on_bye_this_week_tag(bye_week, nfl_week):
+    """Suggested-move tag when the ADD is on bye this week (2026-10-26).
+
+    A bye-week ADD scores zero this week. Tag only, never a veto: the
+    player can still be the right claim for rest-of-season value — but a
+    Monday claim for a player who can't start Sunday must say so on the
+    actionable line. The WAIVER WIRE top-FA lines already show [bye N]
+    via _btag; the suggested-move lines did not, so the line Wesley
+    acts on hid the one fact that changes the claim decision. The K/DEF
+    mirror of #30: #30 picks a non-bye replacement when HIS unit is on
+    bye; this tags the case where the RECOMMENDED unit is on bye."""
+    try:
+        if bye_week is not None and nfl_week is not None \
+                and int(bye_week) == int(nfl_week):
+            return f" [ON BYE W{int(nfl_week)} — scores zero this week]"
+    except (TypeError, ValueError):
+        pass
+    return ""
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--league", required=True)
@@ -2097,7 +2117,9 @@ def main():
                     _ln = (f"  ADD {_fan} ({pos}) / "
                            f"DROP {cur['name']} ({pos}) — "
                            f"your {pos} is {cur_inj}"
-                           + _pathtag(_p, _fapid))
+                           + _pathtag(_p, _fapid)
+                           + on_bye_this_week_tag(kdef_byes.get(_fapid),
+                                                  nfl_week))
                     sug.append((0, 0, cur["val"], True, _fapid, _p,
                                 attach_plan_note(_ln, _fapid, cur["id"],
                                                  plans)))
@@ -2135,7 +2157,9 @@ def main():
                         # move it.
                         _ln = (f"  ADD {_fan} ({pos},FP-ROS #{_fa_rank}) / "
                                f"DROP {cur['name']} ({pos},FP-ROS #{_cur_rank})"
-                               + _pathtag(_p, _fapid))
+                               + _pathtag(_p, _fapid)
+                               + on_bye_this_week_tag(kdef_byes.get(_fapid),
+                                                      nfl_week))
                         sug.append((_cur_rank - _fa_rank, 0, 0, False,
                                     _fapid, _p,
                                     attach_plan_note(_ln, _fapid, cur["id"],
@@ -2163,7 +2187,9 @@ def main():
                            else "")
                 _ln = (f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
                        f"DROP {b['name']} ({b['pos']},{b['val']})"
-                       + _pathtag(_p, fapid) + _closes)
+                       + _pathtag(_p, fapid) + _closes
+                       + on_bye_this_week_tag(
+                           fp.get(fapid, (None, None, None))[0], nfl_week))
                 sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
                             attach_plan_note(_ln, fapid, b["id"], plans)))
                 break
