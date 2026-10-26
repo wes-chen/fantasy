@@ -241,6 +241,25 @@ check("#30: all healthy FAs on bye -> None, never a zero-scoring swap",
 check("#30: empty FA list -> None",
       tb.kdef_bye_replacement([], 8, _kd_fp30, _kd_byes30) is None)
 
+# ---------------- suggested-move bye-week tag (2026-10-26) ----------------
+# The top-FA lines already showed [bye N]; the suggested-move lines did
+# not, so the actionable line hid a bye-week ADD. Tag only, never a veto.
+check("bye tag: ADD on bye this week tagged with the week",
+      tb.on_bye_this_week_tag(8, 8) == " [ON BYE W8 — scores zero this week]")
+check("bye tag: ADD on a different bye week untagged",
+      tb.on_bye_this_week_tag(9, 8) == "")
+check("bye tag: missing bye / week never tags (no phantom week)",
+      tb.on_bye_this_week_tag(None, 8) == ""
+      and tb.on_bye_this_week_tag(8, None) == "")
+check("bye tag: string bye coerced, garbage never tags",
+      tb.on_bye_this_week_tag("8", 8).startswith(" [ON BYE W8")
+      and tb.on_bye_this_week_tag("x", 8) == "")
+_src = open(os.path.join(SKILL, "bin", "trade_board.py")).read()
+check("bye tag: wired into all three suggestion-line constructions "
+      "(def + skill, K/DEF hurt, K/DEF upgrade)",
+      _src.count("on_bye_this_week_tag(") >= 4,
+      f"count={_src.count('on_bye_this_week_tag(')}")
+
 # ---------------- E5: season-timing injury discount ----------------
 _approx = lambda got, want: abs(got - want) < 1e-9
 check("E5: Out wk3 -> 0.5 (no timing decay)",
@@ -2162,6 +2181,60 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               not _bad30, "; ".join(_bad30))
     except Exception as _e30:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP #30 live bye-tag biconditional ({tag}): {_e30}")
+    # Suggested-move bye tag (2026-10-26): a suggested ADD on bye this
+    # week must carry [ON BYE W{n}], and no other suggested line may.
+    # Guarded like #30: SKIP when the FP fetch fails here. Vacuous on
+    # runs with no suggested moves (both boards 2026-10-26) — the unit
+    # checks above carry the firing case, this pin guards the wiring
+    # on future runs when a suggestion exists.
+    try:
+        _wk_mbt = re.search(r"NFL Week (\d+)", out)
+        _wkbt = int(_wk_mbt.group(1)) if _wk_mbt else None
+        if _wkbt is None:
+            raise ValueError("no NFL week in board header")
+        _ppr_mbt = re.search(r"PPR ([0-9.]+)", out)
+        if not _ppr_mbt:
+            raise ValueError("no PPR in board header")
+        _plbt = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _fpbt, _ = tb.get_fp_ecr(_plbt, float(_ppr_mbt.group(1)))
+        _kdbt = tb.get_fp_kdef(_plbt)
+        _namesbt, _dupbt = {}, set()
+        for _sid, _p in _plbt.items():
+            _fn = (_p or {}).get("full_name")
+            if not _fn:
+                continue
+            if _fn in _namesbt:
+                _dupbt.add(_fn)
+            _namesbt[_fn] = _sid
+        for _d in _dupbt:
+            _namesbt.pop(_d, None)
+        _kdnamesbt = {fi.def_display_name(_sid, _plbt): _by
+                      for _sid, (_rk, _by) in _kdbt.items()}
+        _badbt, _checkedbt, _skippedbt = [], 0, 0
+        for _ln in _suggested_moves_of(out):
+            _m = re.match(r"  ADD (.+?) \(([A-Z]+)[,)]", _ln)
+            if not _m:
+                continue
+            _an, _apos = _m.group(1), _m.group(2)
+            if _apos in ("K", "DEF"):
+                _bye = _kdnamesbt.get(_an, "missing")
+            else:
+                _sid = _namesbt.get(_an)
+                _bye = _fpbt.get(_sid, (None,))[0] if _sid else "missing"
+            if _bye == "missing":
+                _skippedbt += 1
+                continue
+            _checkedbt += 1
+            _tagged = f"[ON BYE W{_wkbt}" in _ln
+            if _tagged != (_bye == _wkbt):
+                _badbt.append(f"{_an} bye={_bye} week={_wkbt} "
+                              f"tagged={_tagged}")
+        check(f"{tag}: suggested-move [ON BYE] tag iff ADD bye == NFL week"
+              f" ({_checkedbt} checked, {_skippedbt} unresolvable)",
+              not _badbt, "; ".join(_badbt))
+    except Exception as _ebt:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP suggested-move bye-tag biconditional ({tag}): {_ebt}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
