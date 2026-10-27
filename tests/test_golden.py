@@ -2371,14 +2371,22 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               f"audit={_names}, roster tag hits={_got}")
     # G5 gate: the weight lines print iff Week >= 5 AND the nflverse
     # fetch produced multipliers (G1 degrades -> no multipliers).
+    # E12 (from Week 8): the small league's band widens to x0.7-1.3
+    # with the ceiling-mode suffix — the pin must follow the band the
+    # engine actually prints, or Week 8 reds the suite on a correct
+    # board (the 2026-10-27 baseline failure: WW printed x0.7-1.3
+    # while the pin still demanded x0.9-1.1).
     _wk = int(re.search(r"NFL Week (\d+) \|", out).group(1))
     _g1sec = out.split("=== USAGE-GAP RADAR (G1")[1].split(
         "=== CANDIDATE SWAPS")[0]
     _g5expect = _wk >= 5 and "(unavailable this run" not in _g1sec
+    _g5wide = _wk >= 8 and tag == "weekend-warriors"
+    _g5note = ("G5: deltas use playoff-weighted values (W15-17 SOS "
+               + ("x0.7-1.3, E12 endgame ceiling mode" if _g5wide
+                  else "x0.9-1.1") + ")")
     check(f"{tag}: G5 swap note gated (present iff Week>=5 with data)",
-          ("G5: deltas use playoff-weighted values (W15-17 SOS x0.9-1.1)"
-           in out) == _g5expect,
-          f"week={_wk} expected={_g5expect}")
+          (_g5note in out) == _g5expect,
+          f"week={_wk} expected={_g5expect} note={_g5note}")
     check(f"{tag}: G5 roster legend gated with the weights",
           ("[P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal" in out)
           == _g5expect)
