@@ -186,8 +186,11 @@ be redundant):
 4. **Value baseline, not verdict.** FantasyCalc (settings-matched: numQbs,
    numTeams, PPR) is the starting point. Adjust for: need-premium (desperate
    teams overpay), quality-over-count (one elite beats two flexes in
-   14-teamers), age curves in redraft (33-year-old producers are sells),
-   and job-security risk (backup QBs behind drafted rookies).
+   14-teamers), age is irrelevant in redraft — price rest-of-season
+   2026 points only (his 2026-10-26 correction: future years don't
+   count; a 33-year-old producer is judged on ROS role and schedule,
+   never on age), and job-security risk (backup QBs behind drafted
+   rookies).
    **Freshness check.** FantasyCalc updates daily and is blind to today's
    news — a value can be stale the morning after an injury or a benching.
    The engine prints each player's 30-day value trend next to the number:
