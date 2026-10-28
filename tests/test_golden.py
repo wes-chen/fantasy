@@ -3096,6 +3096,23 @@ _dv_lines3, _dv_excl3 = tb.value_divergences(
 check("divergence: int player id still matches str-keyed players map",
       _dv_lines3 == [] and _dv_excl3 == 1)
 
+# ---------------- redraft-only age rule (2026-10-28) ----------------
+# Wesley's 2026-10-26 correction: snapusa is REDRAFT — price rest-of-season
+# points only; age/future years are irrelevant. The old layer-4 line
+# ("age curves in redraft (33-year-old producers are sells)") contradicted
+# that ruling, so the doc now states the ROS-only rule and the pins below
+# fail if the stale line ever returns.
+_skill_text = open(os.path.join(SKILL, "SKILL.md")).read()
+# Normalize whitespace: SKILL.md prose wraps mid-phrase, so an exact
+# substring check would false-fail on a line break (seen 2026-10-28).
+_skill_flat = " ".join(_skill_text.split())
+check("redraft rule: stale age-curves line is gone from SKILL.md",
+      "age curves in redraft" not in _skill_flat
+      and "33-year-old producers are sells" not in _skill_flat)
+check("redraft rule: ROS-only age rule stated in SKILL.md",
+      "age is irrelevant in redraft" in _skill_flat
+      and "rest-of-season 2026 points only" in _skill_flat)
+
 print()
 if failures:
     print(f"{len(failures)} FAILURES: {failures}")
