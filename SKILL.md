@@ -102,6 +102,7 @@ drop timestamps inside the league's waiver-clear window (E14/ADV-FF-18 —
 the clear time is the observed per-league waiver run (ADV-FF-20):
 snapusa clears ~12:05am Tuesday PT (verified Oct 20 — Monday-night claims processed Tue 00:05);
 weekend warriors clears midnight end of Monday into Tuesday PT (weekly run).
+Sleeper's live waiver_position is post-spend order — after Wesley spends claims it drops him to the back (snapusa showed 14/14 on Oct 27) — so the WAIVER PRIORITY COST section also prints the reverse-standings reset order (worst-first by wins, then points-for); price Monday claims off the reset order, not the live slot.
 Mid-week claims on dropped players follow their own 2-day cooldown, not the weekly run;
 a player dropped within the last ~2 days clears on his own drop-cooldown
 schedule instead — Sleeper's waiver_day_of_week field still claims a
