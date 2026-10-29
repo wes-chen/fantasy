@@ -848,6 +848,37 @@ check("NF-01: waiver_position absent -> roster_id display-order fallback",
 check("NF-01: unknown owner -> None",
       tb.waiver_slot(_fake_rosters, "zzz") is None)
 
+# Reset order (Oct 27 lesson): live waiver_position is post-spend order,
+# so the standings-derived reset order must be computed independently
+# (worst-first by wins, then points-for). Live positions below are
+# deliberately scrambled vs the reset order to prove independence.
+_fake_standings = [
+    {"owner_id": "aaa", "roster_id": 1,
+     "settings": {"waiver_position": 1, "wins": 4, "fpts": 1000,
+                  "fpts_decimal": 0}},
+    {"owner_id": "bbb", "roster_id": 2,
+     "settings": {"waiver_position": 3, "wins": 1, "fpts": 900,
+                  "fpts_decimal": 0}},
+    {"owner_id": "ccc", "roster_id": 3,
+     "settings": {"waiver_position": 2, "wins": 4, "fpts": 950,
+                  "fpts_decimal": 0}},
+]
+check("reset order: worst-first by wins, then points-for",
+      tb.reset_waiver_priority(_fake_standings, "bbb") == 1
+      and tb.reset_waiver_priority(_fake_standings, "ccc") == 2
+      and tb.reset_waiver_priority(_fake_standings, "aaa") == 3)
+check("reset order: fpts_decimal counts toward points-for",
+      tb.reset_waiver_priority([
+          {"owner_id": "eee", "roster_id": 1,
+           "settings": {"wins": 4, "fpts": 1000, "fpts_decimal": 0}},
+          {"owner_id": "fff", "roster_id": 2,
+           "settings": {"wins": 4, "fpts": 999, "fpts_decimal": 99}},
+      ], "fff") == 1)
+check("reset order: unknown owner -> None, missing settings -> no crash",
+      tb.reset_waiver_priority(_fake_standings, "zzz") is None
+      and tb.reset_waiver_priority(
+          [{"owner_id": "x", "roster_id": 1}], "x") == 1)
+
 check("NF-01: slot scarcity #1 of 4 = 1.0, #7 of 14 ~= 0.571",
       tb.slot_scarcity(1, 4) == 1.0
       and abs(tb.slot_scarcity(7, 14) - 0.571) < 0.01)
@@ -2867,6 +2898,22 @@ _m2 = re.search(r"weekend warriors waiver slot: (\d+) of 4( — SCARCE)?",
 check("NF-01: WW slot line self-consistent",
       bool(_m2) and (("— SCARCE" in _m2.group(0))
                      == (int(_m2.group(1)) <= tb.SCARCE_SLOT_CUTOFF)))
+# Reset-order live pin (Oct 27 lesson): on a reverse-standings league
+# the board prints the standings-derived reset order iff it differs
+# from the live post-spend slot, with the right number when present.
+for _lg, _o in ((SNAPUSA, out), (WW, out_ww)):
+    _lgobj = tb.get(f"https://api.sleeper.app/v1/league/{_lg}")
+    _ros = tb.get(f"https://api.sleeper.app/v1/league/{_lg}/rosters")
+    _live = tb.waiver_slot(_ros, ME)
+    _rst = tb.reset_waiver_priority(_ros, ME)
+    _mR = re.search(
+        r"weekly reset order \(reverse standings\): #(\d+) of \d+", _o)
+    _want = ((_lgobj.get("settings") or {}).get("waiver_type") == 1
+             and _rst is not None and _rst != _live)
+    check(f"reset order: live pin {_lg}",
+          (_mR is not None) == _want
+          and (_mR is None or int(_mR.group(1)) == _rst),
+          f"live={_live} reset={_rst} line={_mR.group(0) if _mR else None}")
 check("E3: WW prints the 2-for-1 consolidation section",
       "=== 2-FOR-1 CONSOLIDATION (stars over depth) ===" in out_ww,
       "WW output lacks the section")
