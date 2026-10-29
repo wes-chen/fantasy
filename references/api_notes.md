@@ -8,6 +8,14 @@
 - Rosters: `GET /v1/league/{id}/rosters` → `players[]` (Sleeper player IDs),
   `reserve[]` (IR), `settings.wins/losses`, `settings.waiver_position`,
   `owner_id`, `roster_id`
+  - `settings.waiver_position` is LIVE post-spend order, not the weekly
+    order: after a manager spends claims it drops to the back until the
+    weekly reset (snapusa showed 14/14 on 2026-10-27 while reverse
+    standings put Wesley 11th). Both leagues run `waiver_type=1`
+    (reverse standings, reset weekly); `reset_waiver_priority()` derives
+    the reset order (worst-first by wins, then points-for) and the board
+    prints it in WAIVER PRIORITY COST whenever it differs from the live
+    slot — Monday claims price off the reset order.
   - IR slots are NOT in `roster_positions` — they live in
     `settings.reserve_slots` (league-level count) + each roster's `reserve[]`
     (occupants). A player in `players[]` may already be in `reserve[]`
