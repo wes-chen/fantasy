@@ -124,6 +124,29 @@ def waiver_slot(rosters, me):
     return next(i for i, r in enumerate(ordered, 1)
                 if r.get("owner_id") == me)
 
+def reset_waiver_priority(rosters, me):
+    """Standings-derived waiver order for reverse-standings leagues
+    (waiver_type=1, reset weekly): worst-first by wins, then lowest
+    points-for (fpts + fpts_decimal/100). Sleeper's live waiver_position
+    is POST-SPEND order — after Wesley spends claims it drops him to the
+    back (snapusa showed 14/14 on 2026-10-27) until the weekly reset
+    restores standings order — so the board prints both and Monday
+    claims are priced off this reset order, not the live slot. Ties fall
+    back to API order (Sleeper's exact tiebreak is unverified); returns
+    None when Wesley's roster is absent."""
+    mine = next((r for r in rosters if r.get("owner_id") == me), None)
+    if mine is None:
+        return None
+
+    def _key(r):
+        s = r.get("settings") or {}
+        return ((s.get("wins") or 0),
+                (s.get("fpts") or 0) + (s.get("fpts_decimal") or 0) / 100.0)
+
+    ordered = sorted(rosters, key=_key)
+    return next(i for i, r in enumerate(ordered, 1)
+                if r.get("owner_id") == me)
+
 def slot_scarcity(position, num_teams):
     """0..1: 1.0 at #1 (top of the order), ~0 at the tail (near-free)."""
     return max(0.0, 1.0 - (position - 1) / max(num_teams, 1))
@@ -2262,6 +2285,18 @@ def main():
         scarce = slot <= SCARCE_SLOT_CUTOFF
         print(f"  {league.get('name')} waiver slot: {slot} of {num_teams}"
               + (" — SCARCE" if scarce else ""))
+        # Oct 27 lesson: the live slot above is post-spend order, not
+        # the order Monday claims run under. Both leagues run
+        # waiver_type=1 (reverse standings, reset weekly), so print the
+        # standings-derived reset order alongside when it differs —
+        # the Oct 27 board's bare "14/14" was cited as his priority
+        # before the standings correction (11/14) caught it.
+        if (league.get("settings") or {}).get("waiver_type") == 1:
+            _reset = reset_waiver_priority(rosters, a.me)
+            if _reset is not None and _reset != slot:
+                print(f"  weekly reset order (reverse standings): "
+                      f"#{_reset} of {num_teams} — live #{slot} is "
+                      f"post-spend order, reset weekly")
         v_edges = [e for e, _, _, forced, _, _, _ in sug if not forced]
         typical = (sorted(v_edges)[len(v_edges) // 2] if v_edges
                    else TYPICAL_EDGE_FALLBACK)
