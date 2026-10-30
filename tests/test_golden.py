@@ -3160,6 +3160,77 @@ check("redraft rule: ROS-only age rule stated in SKILL.md",
       "age is irrelevant in redraft" in _skill_flat
       and "rest-of-season 2026 points only" in _skill_flat)
 
+# ---------------- post-deadline trade-proposal suppression (2026-10-30) ----------------
+# The posture line said 'DEADLINE PASSED: waivers only' while CANDIDATE
+# SWAPS and 2-FOR-1 kept printing deals — a trap the Tuesday worker could
+# surface after Week 11. The gate (ADV-FF-14 boundary: legal through Week
+# N, locked at N+1) keeps both headers but replaces the rows with a
+# suppression note; history, refusal, and waiver sections are untouched.
+check("deadline gate: week == deadline still open",
+      tb.proposals_suppressed(11, 11) is False)
+check("deadline gate: week == deadline+1 suppressed",
+      tb.proposals_suppressed(12, 11) is True)
+check("deadline gate: mid-season open",
+      tb.proposals_suppressed(8, 11) is False)
+check("deadline gate: garbage input never suppresses",
+      tb.proposals_suppressed(None, 11) is False
+      and tb.proposals_suppressed("x", 11) is False)
+
+# Live pre-deadline pin: at the current week (<= deadline) neither board
+# carries the suppression note.
+for _lg12, _o12 in ((SNAPUSA, out_snap), (WW, out_ww)):
+    check(f"deadline gate: no suppression note pre-deadline {_lg12}",
+          "trade proposals suppressed" not in _o12)
+
+# End-to-end post-deadline branch: in-process board runs with the Sleeper
+# state week faked to 12 (past the Week 11 deadline), everything else
+# live. Side effects match a normal board run (FC + G3 snapshots carry
+# real timestamps/values — only the week is faked).
+import io as _io12
+import contextlib as _ctxlib12
+_orig_get12 = tb.get
+_orig_argv12 = sys.argv[:]
+
+
+def _fake_week12(url, *a, **k):
+    if url == f"{tb.SLEEPER}/state/nfl":
+        return {"week": 12}
+    return _orig_get12(url, *a, **k)
+
+
+try:
+    tb.get = _fake_week12
+    for _lg12 in (SNAPUSA, WW):
+        sys.argv = ["trade_board.py", "--league", _lg12, "--me", ME]
+        _buf12 = _io12.StringIO()
+        with _ctxlib12.redirect_stdout(_buf12):
+            tb.main()
+        _o12 = _buf12.getvalue()
+        check(f"deadline gate: posture flips post-deadline {_lg12}",
+              "DEADLINE PASSED: waivers only" in _o12)
+        try:
+            _sw12 = _section(
+                _o12, "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")
+        except AssertionError:
+            _sw12 = None
+        check(f"deadline gate: swaps header kept, rows suppressed {_lg12}",
+              _sw12 == ["  (trade proposals suppressed — trade deadline "
+                        "passed; waivers only)"],
+              f"section: {_sw12}")
+        if _lg12 == WW:
+            try:
+                _c12 = _section(
+                    _o12, "=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
+            except AssertionError:
+                _c12 = None
+            check("deadline gate: 2-for-1 header kept, rows suppressed (WW)",
+                  _c12 == ["  (trade proposals suppressed — trade deadline "
+                           "passed; waivers only)"],
+                  f"section: {_c12}")
+finally:
+    tb.get = _orig_get12
+    sys.argv = _orig_argv12
+
 print()
 if failures:
     print(f"{len(failures)} FAILURES: {failures}")
