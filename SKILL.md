@@ -275,6 +275,10 @@ be redundant):
    Week 5-8 deals should lean into it, not fight it). Label every proposal **RENTAL** (pays off in the next 2-3
    weeks) or **KEEPER** (rest-of-season/playoff value) so the horizon
    is explicit. After the deadline: waivers only, no trade proposals.
+   The engine enforces this mechanically (2026-10-30): past the deadline
+   the CANDIDATE SWAPS and 2-FOR-1 sections print only a suppression note
+   — headers stay so the Tuesday parser never breaks — and the IR stash
+   hunt was already suppressed (E15).
 9. **Fit-asymmetry veto.** The engine only shows swaps where the incoming
    player cracks his projected starting lineup, and each row names who
    starts and who sits. Equal FantasyCalc value ≠ equal lineup value: a
