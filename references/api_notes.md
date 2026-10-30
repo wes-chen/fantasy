@@ -214,4 +214,8 @@ v2 API key (not yet obtained) — search is the fallback.
 `GET https://api.sleeper.app/v1/state/nfl` → `week` (also `season`).
 League `settings.trade_deadline` (both his leagues: 11). The engine maps
 week → posture: W1-4 ACQUIRE TALENT, W5-8 BALANCED, W9-11 WIN NOW,
-past deadline: waivers only.
+past deadline: waivers only. Past deadline the CANDIDATE SWAPS and
+2-FOR-1 sections print only a suppression note (headers kept for the
+Tuesday parser); the gate is `tb.proposals_suppressed()` on the ADV-FF-14
+boundary (legal through Week N, locked at N+1), same boundary as the
+posture line.
