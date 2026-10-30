@@ -976,6 +976,25 @@ def on_bye_this_week_tag(bye_week, nfl_week):
         pass
     return ""
 
+
+def proposals_suppressed(nfl_week, trade_dl):
+    """Post-deadline trade-proposal gate (ADV-FF-14 boundary, 2026-10-30).
+
+    Same boundary as the season-clock posture: Sleeper trade_deadline=N
+    means trades are legal THROUGH NFL Week N, so proposals stop when the
+    state week rolls to N+1. The posture line already said 'DEADLINE
+    PASSED: waivers only' while the CANDIDATE SWAPS and 2-FOR-1 sections
+    kept printing deals — a trap recommendation the Tuesday worker could
+    surface after Week 11. The gate suppresses the proposal sections
+    (headers stay, with a suppression note, so the Tuesday parser's
+    header expectations never break); history, refusal, and waiver
+    sections are untouched."""
+    try:
+        return int(nfl_week) > int(trade_dl)
+    except (TypeError, ValueError):
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--league", required=True)
@@ -1036,7 +1055,8 @@ def main():
     # `nfl_week >= trade_dl` and the stop job one week earlier.)
     trade_review_days = (league.get("settings") or {}).get(
         "trade_review_days", 0)
-    if nfl_week > trade_dl:
+    deadline_passed = proposals_suppressed(nfl_week, trade_dl)
+    if deadline_passed:
         posture = "DEADLINE PASSED: waivers only"
     elif nfl_week >= 9:
         posture = ("WIN NOW: maximize rest-of-season + playoff points; "
@@ -1654,92 +1674,97 @@ def main():
     print()
     # candidate 1-for-1s: your surplus -> their need, their surplus -> your need
     print("=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")
-    print("  ranked by projected lineup-points delta for you; value gap shown "
-          "for fairness (bands: <10% EXCELLENT, 10-20% FAIR, 20-35% STRETCH, "
-          ">35% UNFAIR); incoming must crack your projected starting lineup")
-    print("  value ranges: (point, lo-hi) from 30-day trend volatility "
-          "(+/- half the 30d drift); [LOW-SIGNAL LATERAL] = both 30-day "
-          "trends flat (FC displayTrend) with a small lineup delta")
-    print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since the "
-          "previous board run (intraday repricing on news) — the fairness "
-          "gap on that row may be stale; re-check before sending")
-    if pw_active:
-        print(f"  G5: deltas use playoff-weighted values "
-              f"(W15-17 SOS {_g5_range}"
-              + (", E12 endgame ceiling mode" if _wide else "") + ")")
-    my_need = need_score(me)
-    _all_tradable = tradable(me)
-    my_tradable = [(x, f) for x, f in _all_tradable if x["id"] not in onblock]
-    n_blocked = len(_all_tradable) - len(my_tradable)
+    if deadline_passed:
+        print("  (trade proposals suppressed — trade deadline "
+              "passed; waivers only)")
+        print()
+    else:
+        print("  ranked by projected lineup-points delta for you; value gap shown "
+              "for fairness (bands: <10% EXCELLENT, 10-20% FAIR, 20-35% STRETCH, "
+              ">35% UNFAIR); incoming must crack your projected starting lineup")
+        print("  value ranges: (point, lo-hi) from 30-day trend volatility "
+              "(+/- half the 30d drift); [LOW-SIGNAL LATERAL] = both 30-day "
+              "trends flat (FC displayTrend) with a small lineup delta")
+        print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since the "
+              "previous board run (intraday repricing on news) — the fairness "
+              "gap on that row may be stale; re-check before sending")
+        if pw_active:
+            print(f"  G5: deltas use playoff-weighted values "
+                  f"(W15-17 SOS {_g5_range}"
+                  + (", E12 endgame ceiling mode" if _wide else "") + ")")
+        my_need = need_score(me)
+        _all_tradable = tradable(me)
+        my_tradable = [(x, f) for x, f in _all_tradable if x["id"] not in onblock]
+        n_blocked = len(_all_tradable) - len(my_tradable)
 
-    def dval_for(x):
-        """FantasyCalc value with the E5 injury discount applied
-        (ADV-FF-10 static status multiplier + E5 season-timing bracket for
-        Out/IR/Doubtful, from this run's NFL week — injured-player values
-        visibly decay as the season progresses) and the G5
-        playoff-schedule weight (x0.9-1.1 from Week 5; x0.7-1.3 on the
-        small league from Week 8, E12 endgame ceiling mode)."""
-        st = (players.get(str(x["id"]), {}) or {}).get("injury_status") or ""
-        return x["val"] * injury_discount(st, nfl_week) * pw_of(x["id"])
+        def dval_for(x):
+            """FantasyCalc value with the E5 injury discount applied
+            (ADV-FF-10 static status multiplier + E5 season-timing bracket for
+            Out/IR/Doubtful, from this run's NFL week — injured-player values
+            visibly decay as the season progresses) and the G5
+            playoff-schedule weight (x0.9-1.1 from Week 5; x0.7-1.3 on the
+            small league from Week 8, E12 endgame ceiling mode)."""
+            st = (players.get(str(x["id"]), {}) or {}).get("injury_status") or ""
+            return x["val"] * injury_discount(st, nfl_week) * pw_of(x["id"])
 
-    def disc_lineup(bypos):
-        return lineup_ids({p: [dict(x, val=dval_for(x)) for x in lst]
-                           for p, lst in bypos.items()})
+        def disc_lineup(bypos):
+            return lineup_ids({p: [dict(x, val=dval_for(x)) for x in lst]
+                               for p, lst in bypos.items()})
 
-    my_lineup_dval = sum(x["val"] for x in disc_lineup(me["bypos"]))
-    # #21: sits/starts must be diffed against the SAME lineup the delta
-    # baseline comes from (discounted), not the raw one. The raw
-    # my_lineup/my_lineup_ids stay untouched for the G8/G9 sections.
-    _my_lineup_d = disc_lineup(me["bypos"])
-    _my_lineup_d_ids = {x["id"] for x in _my_lineup_d}
+        my_lineup_dval = sum(x["val"] for x in disc_lineup(me["bypos"]))
+        # #21: sits/starts must be diffed against the SAME lineup the delta
+        # baseline comes from (discounted), not the raw one. The raw
+        # my_lineup/my_lineup_ids stay untouched for the G8/G9 sections.
+        _my_lineup_d = disc_lineup(me["bypos"])
+        _my_lineup_d_ids = {x["id"] for x in _my_lineup_d}
 
-    def sd(mine, theirs):
-        # board-bound E2 delta: closure context -> module-level swap_delta
-        # (the golden tests hit swap_delta directly with synthetic inputs)
-        return swap_delta(mine, theirs, me_bypos=me["bypos"],
-                          dval_for=dval_for, lineup_ids_fn=lineup_ids,
-                          my_lineup_dval=my_lineup_dval,
-                          my_lineup=_my_lineup_d,
-                          my_lineup_ids=_my_lineup_d_ids, fp=fp)
-    rows = []
-    dropped = 0
-    bye_dropped = 0
-    for rid, st in teams.items():
-        if rid == my_rid:
-            continue
-        t_need = need_score(st)
-        for mine, mflag in my_tradable:
-            if t_need.get(mine["pos"], 0) <= 0:
-                continue  # they don't need it
-            for theirs, tflag in tradable(st):
-                if my_need.get(theirs["pos"], 0) <= 0:
-                    continue  # you don't need it
-                delta, _, _, bye_veto = sd(mine, theirs)
-                if bye_veto:
-                    # ADV-FF-15: incoming would push a bye week to 4+
-                    # projected starters — vetoed, not just tagged
-                    bye_dropped += 1
-                    continue
-                if delta <= 0:
-                    # P5 fit veto: incoming can't crack his starting
-                    # lineup, so equal calc value buys zero lineup gain.
-                    dropped += 1
-                    continue
-                rows.append(show_swap(mine, mflag, theirs, tflag, st["name"]))
-    for _, line in sorted(rows, reverse=True)[:12]:
-        print(line)
-    if not rows:
-        print("  (no clean 1-for-1 fits)")
-    if dropped:
-        print(f"  ({dropped} lateral swap(s) dropped: incoming player "
-              f"couldn't crack your projected starting lineup)")
-    if bye_dropped:
-        print(f"  ({bye_dropped} swap(s) vetoed: incoming player would push "
-              f"a bye week to 4+ projected starters)")
-    if n_blocked:
-        print(f"  ({n_blocked} of your tradable player(s) ON-BLOCK: pending "
-              f"offer open, not proposed)")
-    print()
+        def sd(mine, theirs):
+            # board-bound E2 delta: closure context -> module-level swap_delta
+            # (the golden tests hit swap_delta directly with synthetic inputs)
+            return swap_delta(mine, theirs, me_bypos=me["bypos"],
+                              dval_for=dval_for, lineup_ids_fn=lineup_ids,
+                              my_lineup_dval=my_lineup_dval,
+                              my_lineup=_my_lineup_d,
+                              my_lineup_ids=_my_lineup_d_ids, fp=fp)
+        rows = []
+        dropped = 0
+        bye_dropped = 0
+        for rid, st in teams.items():
+            if rid == my_rid:
+                continue
+            t_need = need_score(st)
+            for mine, mflag in my_tradable:
+                if t_need.get(mine["pos"], 0) <= 0:
+                    continue  # they don't need it
+                for theirs, tflag in tradable(st):
+                    if my_need.get(theirs["pos"], 0) <= 0:
+                        continue  # you don't need it
+                    delta, _, _, bye_veto = sd(mine, theirs)
+                    if bye_veto:
+                        # ADV-FF-15: incoming would push a bye week to 4+
+                        # projected starters — vetoed, not just tagged
+                        bye_dropped += 1
+                        continue
+                    if delta <= 0:
+                        # P5 fit veto: incoming can't crack his starting
+                        # lineup, so equal calc value buys zero lineup gain.
+                        dropped += 1
+                        continue
+                    rows.append(show_swap(mine, mflag, theirs, tflag, st["name"]))
+        for _, line in sorted(rows, reverse=True)[:12]:
+            print(line)
+        if not rows:
+            print("  (no clean 1-for-1 fits)")
+        if dropped:
+            print(f"  ({dropped} lateral swap(s) dropped: incoming player "
+                  f"couldn't crack your projected starting lineup)")
+        if bye_dropped:
+            print(f"  ({bye_dropped} swap(s) vetoed: incoming player would push "
+                  f"a bye week to 4+ projected starters)")
+        if n_blocked:
+            print(f"  ({n_blocked} of your tradable player(s) ON-BLOCK: pending "
+                  f"offer open, not proposed)")
+        print()
     # --- E3: 2-for-1 consolidation (small leagues only) ---
     # WW's core move: two of your surplus starters for one elite. In a
     # 14-team desert depth is currency, so this section only runs where
@@ -1749,7 +1774,12 @@ def main():
     # always frees exactly one, which refills from the wire in a 4-team
     # league), with the value gap vs the combined package shown for
     # fairness and the same bye-cluster veto as 1-for-1s.
-    if num_teams <= 6:
+    if num_teams <= 6 and deadline_passed:
+        print("=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
+        print("  (trade proposals suppressed — trade deadline "
+              "passed; waivers only)")
+        print()
+    if num_teams <= 6 and not deadline_passed:
         print("=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
         print("  two surplus pieces -> one elite; ranked by lineup-points "
               "delta per freed roster slot (freed slot refills from the "
