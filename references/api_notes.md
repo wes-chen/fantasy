@@ -219,3 +219,15 @@ past deadline: waivers only. Past deadline the CANDIDATE SWAPS and
 Tuesday parser); the gate is `tb.proposals_suppressed()` on the ADV-FF-14
 boundary (legal through Week N, locked at N+1), same boundary as the
 posture line.
+
+## Superflex QB coverage gap (2026-10-31)
+
+`fi.coverage_gaps(..., is_sf=True)` flags a Superflex roster with no QB
+beyond the QB + SUPER_FLEX slots — the Drew Lock lesson position. A QB
+scratch there drops SUPER_FLEX to a flex player (a lineup hit, not a
+forced zero like the TE gap), and the line carries `[EXPOSED:
+<designation>]` when a QB starter is Questionable or worse. A waiver QB
+add that closes it is tagged `[closes QB coverage gap]` via the same
+`tb.closes_coverage_gap()` predicate as TE. Live in snapusa from the
+Cousins trade on (Dak + Jones only, no QB3); skipped in wire-rich
+(<=6-team) leagues like the rest of the audit.
