@@ -2293,6 +2293,31 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
                       ln for ln in _ros29.splitlines()
                       if ln.startswith("  coverage gap: TE")),
                   f"TEs={_te_names}")
+    # QB coverage gap (Superflex, 2026-10-31): printed iff rostered QBs
+    # number no more than the effective QB slots (QB + SUPER_FLEX).
+    # Guarded SKIP on parse failure — the unit checks carry the logic.
+    try:
+        _qb_line = next((ln for ln in _ros29.splitlines()
+                         if ln.startswith("  QB: ")), "")
+        _qb_names = [n.strip() for n in
+                     _qb_line.split("  QB: ", 1)[1].split(", ")
+                     if n.strip() and n.strip() != "(none rostered)"]
+        _eff_m = re.search(r"'QB': (\d+)",
+                           next(ln for ln in out.splitlines()
+                                if ln.startswith("  effective slots: ")))
+        _qb_slots = int(_eff_m.group(1))
+        _qb_gap_printed = any(ln.startswith("  coverage gap: QB")
+                              for ln in _ros29.splitlines())
+        if tag == "weekend-warriors":
+            check(f"{tag}: QB gap silent in wire-rich league",
+                  not _qb_gap_printed, "QB gap line printed in 4-team")
+        else:
+            check(f"{tag}: QB gap printed iff QBs <= effective QB slots",
+                  _qb_gap_printed == (len(_qb_names) <= _qb_slots),
+                  f"QBs={_qb_names} slots={_qb_slots} "
+                  f"gap_printed={_qb_gap_printed}")
+    except Exception as _eqb:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP QB coverage-gap biconditional ({tag}): {_eqb}")
     check(f"{tag}: swaps sorted by delta (ADV-FF-15)",
           "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===" in out)
     check(f"{tag}: trade-lock boundary line (ADV-FF-14)",
@@ -3069,6 +3094,48 @@ check("coverage: no gap -> no tag",
       tb.closes_coverage_gap("TE", "WR", set()) is False)
 check("coverage: FLEX-POOL never takes the close tag",
       tb.closes_coverage_gap("FLEX-POOL", "WR", {"FLEX-POOL"}) is False)
+# QB coverage gap (Superflex, 2026-10-31): no QB3 behind QB + SUPER_FLEX
+# is the Drew Lock lesson position — named plainly, not left to the
+# needs table's "!" flag. Real base slots: QB 1 (SUPER_FLEX is not a
+# base slot); the 2-QB fixture silences the TE gap (2 TEs) and the pool
+# gap (9 eligible for 8 slots).
+def _cg_qb(qb_n, qb_inj=""):
+    bp = {"QB": [{"id": f"q{i}", "name": f"QB{i}", "pos": "QB",
+                  "val": 1000 - 100 * i} for i in range(qb_n)],
+          "TE": [{"id": f"t{i}", "name": f"TE{i}", "pos": "TE", "val": 200}
+                 for i in range(2)],
+          "RB": [{"id": f"r{i}", "name": f"RB{i}", "pos": "RB", "val": 100}
+                 for i in range(3)],
+          "WR": [{"id": f"w{i}", "name": f"WR{i}", "pos": "WR", "val": 100}
+                 for i in range(4)]}
+    inj = {f"q{i}": qb_inj for i in range(qb_n)}
+    return bp, (lambda sid: inj.get(str(sid), "")), \
+        {"QB": 1, "RB": 2, "WR": 3, "TE": 1}, 2
+_bpq, _injq, _bsq, _fxq = _cg_qb(2)
+_gq = fi.coverage_gaps(_bpq, _bsq, _fxq, _injq, 14, is_sf=True)
+check("coverage: 2 QBs in Superflex -> lone QB gap, SUPER_FLEX named",
+      len(_gq) == 1 and _gq[0]["pos"] == "QB"
+      and "2 QBs" in _gq[0]["detail"] and "SUPER_FLEX" in _gq[0]["detail"]
+      and _gq[0]["inj"] == "",
+      f"gaps={_gq}")
+_bpq2, _injq2, _bsq2, _fxq2 = _cg_qb(2, qb_inj="Questionable")
+_gq2 = fi.coverage_gaps(_bpq2, _bsq2, _fxq2, _injq2, 14, is_sf=True)
+check("coverage: Questionable QB starter -> QB gap exposed",
+      len(_gq2) == 1 and _gq2[0]["inj"] == "Questionable",
+      f"gaps={_gq2}")
+_bpq3, _injq3, _bsq3, _fxq3 = _cg_qb(3)
+check("coverage: 3 QBs in Superflex -> no QB gap",
+      not [g for g in fi.coverage_gaps(_bpq3, _bsq3, _fxq3, _injq3, 14,
+                                       is_sf=True) if g["pos"] == "QB"])
+check("coverage: 2 QBs in 1-QB league -> no QB gap",
+      not [g for g in fi.coverage_gaps(_bpq, _bsq, _fxq, _injq, 14)
+           if g["pos"] == "QB"])
+check("coverage: 2 QBs in Superflex, 4-team league -> audit silent",
+      fi.coverage_gaps(_bpq, _bsq, _fxq, _injq, 4, is_sf=True) == [])
+check("coverage: ADD QB / DROP WR closes the QB gap",
+      tb.closes_coverage_gap("QB", "WR", {"QB"}) is True)
+check("coverage: ADD QB / DROP QB closes nothing",
+      tb.closes_coverage_gap("QB", "QB", {"QB"}) is False)
 
 # ---------------- value divergence: injury veto ----------------
 # 2026-10-21: the divergence section flagged Davante Adams (Sleeper Out,
