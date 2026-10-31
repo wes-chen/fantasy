@@ -1089,13 +1089,19 @@ def infer_backups_from_snaps(snaps_csv, team):
 # wire-rich leagues (<=6 teams): the wire replaces a scratch the same
 # morning. Bye-week overlap is intentionally out of scope — G9 owns it.
 
-def coverage_gaps(bypos, base_slots, flex_slots, injury_of, num_teams):
-    """Return a list of gap dicts: {pos, starter, inj}.
+def coverage_gaps(bypos, base_slots, flex_slots, injury_of, num_teams,
+                  is_sf=False):
+    """Return a list of gap dicts: {pos, starter, inj, detail}.
 
-    pos is "TE" or "FLEX-POOL"; starter is the lone starter's name (or
-    None when no TE is rostered at all); inj is the lone starter's live
-    injury designation ("" when clean) — any designation at all counts
-    as exposed, Questionable included.
+    pos is "TE", "QB" (Superflex only), or "FLEX-POOL"; starter is the
+    lone starter's name (or None when no TE is rostered at all); inj is
+    the live injury designation of the exposed starter ("" when clean) —
+    any designation at all counts as exposed, Questionable included.
+    The QB gap fires when rostered QBs number no more than the QB slots
+    (base QB + SUPER_FLEX): a QB scratch then drops SUPER_FLEX to a flex
+    player — a lineup hit, not a forced zero, but the Drew Lock lesson
+    position, so it is named plainly rather than left to the needs
+    table's "!" flag.
     """
     gaps = []
     if num_teams <= 6:
@@ -1108,6 +1114,20 @@ def coverage_gaps(bypos, base_slots, flex_slots, injury_of, num_teams):
         gaps.append({"pos": "TE",
                      "starter": starter["name"] if starter else None,
                      "inj": inj or ""})
+    if is_sf:
+        qbs = sorted(bypos.get("QB", []), key=lambda x: -x["val"])
+        qb_slots = base_slots.get("QB", 0) + 1  # QB + SUPER_FLEX
+        if len(qbs) <= qb_slots:
+            inj = ""
+            for s in qbs[:qb_slots]:
+                d = injury_of(s["id"])
+                if d:
+                    inj = d
+                    break
+            gaps.append({"pos": "QB", "starter": None, "inj": inj or "",
+                         "detail": (f"only {len(qbs)} QBs for {qb_slots} QB "
+                                    f"slots (QB + SUPER_FLEX) — a QB scratch "
+                                    f"drops SUPER_FLEX to a flex player")})
     eligible = sum(len(bypos.get(p, [])) for p in flex_pool)
     slots = sum(base_slots.get(p, 0) for p in flex_pool) + flex_slots
     if eligible <= slots:
