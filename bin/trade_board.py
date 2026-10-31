@@ -1520,14 +1520,17 @@ def main():
     # Coverage-gap audit: starting-slot positions with no eligible backup
     # beyond the projected starters. TE is the live one — a late scratch
     # at an uncovered TE is a forced zero (flagged by hand twice,
-    # 2026-10-16/17, before this was mechanized). Skipped in wire-rich
-    # leagues (<=6 teams): the wire replaces a scratch the same morning.
-    # Rendered inside YOUR ROSTER — no new section header (the Tuesday
-    # worker parses headers).
+    # 2026-10-16/17, before this was mechanized). In Superflex, QB is
+    # the same audit: no QB3 behind the QB + SUPER_FLEX slots means a
+    # QB scratch drops SUPER_FLEX to a flex player (the Drew Lock
+    # lesson position — live in snapusa from the Cousins trade on, Dak
+    # + Jones only). Skipped in wire-rich leagues (<=6 teams): the wire
+    # replaces a scratch the same morning. Rendered inside YOUR ROSTER
+    # — no new section header (the Tuesday worker parses headers).
     _inj_of = (lambda sid: ((players.get(str(sid), {}) or {})
                             .get("injury_status") or ""))
     _cov_gaps = fi.coverage_gaps(me["bypos"], base_slots, flex_slots,
-                                 _inj_of, num_teams)
+                                 _inj_of, num_teams, is_sf=is_sf)
     _cov_gap_poses = {g["pos"] for g in _cov_gaps}  # closes_coverage_gap
     # owns the FLEX-POOL exclusion for the waiver tag below
     for _g in _cov_gaps:
@@ -1536,6 +1539,9 @@ def main():
             _exp = f" [EXPOSED: {_g['inj']}]" if _g["inj"] else ""
             print(f"  coverage gap: TE — no backup behind {_who} "
                   f"(a late scratch is a forced zero){_exp}")
+        elif _g["pos"] == "QB":
+            _exp = f" [EXPOSED: {_g['inj']}]" if _g["inj"] else ""
+            print(f"  coverage gap: QB — {_g['detail']}{_exp}")
         else:
             print(f"  coverage gap: {_g['detail']} "
                   f"(any RB/WR/TE injury forces a zero)")
