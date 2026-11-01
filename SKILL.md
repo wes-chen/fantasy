@@ -112,7 +112,11 @@ Monday/Tuesday clear), a `=== PENDING CLAIMS ===` section (chat-driven
 `pending_claims.md` registry — pending claims are invisible to the Sleeper
 API, so Rumi adds a row when Wesley says he filed a claim; the section
 prints each claim's live resolution — CLEARED on his roster, FAILED on
-another manager's roster, else expected clear — and claimed players carry
+another manager's roster, else expected clear — except a still-FA claim
+filed 8+ days ago (past a full weekly waiver cycle, so a run has passed
+without it clearing): it renders STALE with a resolve-the-registry note
+instead of a stale ETA, while the ADD stays suppressed until chat resolves
+the row — and claimed players carry
 [CLAIM-PENDING] on FA lines and are never re-recommended as ADDs, the
 Oct 13-16 Chase lesson), a `=== PLANNED MOVES ===` section (chat-driven
 `planned_moves.md` registry — Rumi adds a row when Wesley states a plan,
