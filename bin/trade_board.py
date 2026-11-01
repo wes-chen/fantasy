@@ -257,6 +257,30 @@ def claim_eta(fapid, recent_drops, waiver_clear_days=2, weekly_lbl="",
                 f"({days}d drop cooldown)")
     return weekly_lbl
 
+def claim_is_stale(filed_date, today=None):
+    """True when a still-FA pending claim is older than one full weekly
+    waiver cycle. Both leagues run weekly (snapusa Tue ~12:05am PT, WW
+    Tue ~12:02am PT) and a drop-cooldown claim clears in ~2 days, so a
+    claim filed 8+ days ago that is still a free agent has necessarily
+    passed a run without clearing — it lapsed, was withdrawn in-app
+    (invisible to the registry), or the row was never resolved, and its
+    'expected clears' ETA is stale. 8 days, not 7: a claim filed just
+    after a run legitimately waits ~7 days for the next one. Fail-open
+    (False) on unparsable or future dates. The board keeps suppressing
+    the ADD on a stale row — the note tells chat to resolve the row;
+    only chat edits the registry."""
+    try:
+        from datetime import date as _date
+        filed = _date.fromisoformat(str(filed_date).strip())
+    except (TypeError, ValueError):
+        return False
+    if today is None:
+        today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    try:
+        return (today - filed).days >= 8
+    except TypeError:
+        return False
+
 def slot_math(roster, rp, reserve_slots):
     """Live active/bench/IR arithmetic (E14). Sleeper double-lists IR
     occupants in `players`, so active = players minus the reserve
@@ -2060,6 +2084,17 @@ def main():
                 print(f"  {_c['name']} ({_c['pos']}): claim FAILED — "
                       f"now on {_who}'s roster{_lg}")
             else:
+                if claim_is_stale(
+                        _c["date"],
+                        datetime.now(ZoneInfo("America/Los_Angeles")).date()):
+                    print(f"  {_c['name']} ({_c['pos']}): filed {_c['date']} — "
+                          f"STALE (past a full waiver cycle, still a free "
+                          f"agent): the claim likely lapsed or was withdrawn "
+                          f"— resolve the registry row; the ADD stays "
+                          f"suppressed until then"
+                          + (_lg if _lg else "")
+                          + (f" ({_c['notes']})" if _c["notes"] else ""))
+                    continue
                 _eta = claim_eta(_cid, recent_drops, _clear_days, _clear_lbl,
                                  _now_ms)
                 print(f"  {_c['name']} ({_c['pos']}): filed {_c['date']} — "
