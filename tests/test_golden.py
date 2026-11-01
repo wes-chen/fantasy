@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # ADV-FF-20: derive SKILL from this file's own location, not a hardcoded
@@ -685,6 +685,27 @@ check("claim_eta: bad waiver_clear_days falls back to 2",
 check("claim_eta: corrupt drop timestamp -> weekly-run label, no crash",
       tb.claim_eta("p1", {"p1": "not-a-time"}, 2, "WEEKLY", _NOW)
       == "WEEKLY")
+
+# claim_is_stale (2026-11-01): a pending claim still showing FA past one
+# full weekly waiver cycle has necessarily passed a run without clearing,
+# so its 'expected clears' ETA is stale and the row needs resolving.
+# 8 days, not 7: a claim filed just after a run legitimately waits ~7
+# days for the next one. Suppression stays on — only the note is new.
+_stale_today = date(2026, 11, 1)
+check("claim_is_stale: 7 days old -> fresh (may still await its first run)",
+      tb.claim_is_stale("2026-10-25", _stale_today) is False)
+check("claim_is_stale: 8 days old -> stale (a run has passed)",
+      tb.claim_is_stale("2026-10-24", _stale_today) is True)
+check("claim_is_stale: 15 days old -> stale",
+      tb.claim_is_stale("2026-10-17", _stale_today) is True)
+check("claim_is_stale: filed today -> fresh",
+      tb.claim_is_stale("2026-11-01", _stale_today) is False)
+check("claim_is_stale: future date -> fresh, fail-open",
+      tb.claim_is_stale("2026-11-05", _stale_today) is False)
+check("claim_is_stale: garbage date -> fresh, fail-open, no crash",
+      tb.claim_is_stale("not-a-date", _stale_today) is False)
+check("claim_is_stale: None -> fresh, fail-open, no crash",
+      tb.claim_is_stale(None, _stale_today) is False)
 
 # Sleeper double-lists IR occupants in `players`: active must subtract
 # the reserve overlap (the 9/23 Pacheco case: 17 listed, 1 in reserve,
@@ -2655,20 +2676,30 @@ try:
         _m = re.search(r"^  top FA \w+: ([^(]+)\(", _pass1, re.M)
         if _m and _m.group(1) in _name2pid:
             _target_name, _target_pid = _m.group(1), _name2pid[_m.group(1)]
+    # ETA-asserted rows carry a fresh filed date (2 days ago); a claim
+    # filed 2026-10-17 renders STALE by now (2026-11-01), not an ETA —
+    # that is the stale-row case, asserted separately below.
+    _fresh = (date.today() - timedelta(days=2)).isoformat()
     with open(_claims_file, "w") as fh:
-        fh.write("99999999 | Synthetic Pending | WR | 2026-10-17 | pending | snapusa | test\n")
+        fh.write(f"99999999 | Synthetic Pending | WR | {_fresh} | pending | snapusa | test\n")
         fh.write(f"{_mine_pid} | Mine Player | RB | 2026-10-17 | pending | snapusa | test\n")
         fh.write(f"{_theirs_pid} | Theirs Player | WR | 2026-10-17 | pending | snapusa | test\n")
         if _target_pid:
-            fh.write(f"{_target_pid} | {_target_name} | FA | 2026-10-17 | pending | snapusa | test\n")
-        fh.write("88888888 | WW Only | RB | 2026-10-17 | pending | ww | test\n")
+            fh.write(f"{_target_pid} | {_target_name} | FA | {_fresh} | pending | snapusa | test\n")
+        fh.write("77777777 | Stale Claim | WR | 2026-10-17 | pending | snapusa | test\n")
+        fh.write(f"88888888 | WW Only | RB | {_fresh} | pending | ww | test\n")
     _out = run_board(SNAPUSA).stdout
     check("pending claims: PENDING CLAIMS section prints (snapusa)",
           "=== PENDING CLAIMS (your open claims" in _out)
     check("pending claims: still-FA claim shows expected weekly clear",
-          re.search(r"Synthetic Pending \(WR\): filed 2026-10-17 — expected "
+          re.search(r"Synthetic Pending \(WR\): filed " + _fresh + r" — expected "
                     r"clears ~12:05am Tue PT, burns #\d+ \[snapusa\]",
                     _out) is not None, _out[-800:])
+    _stale_line = next((ln for ln in _out.splitlines()
+                        if ln.strip().startswith("Stale Claim (WR):")), "")
+    check("pending claims: 15-day-old still-FA claim renders STALE, not an ETA",
+          "STALE" in _stale_line and "expected" not in _stale_line
+          and "resolve the registry row" in _stale_line, _stale_line)
     check("pending claims: claim on his roster -> CLEARED",
           "Mine Player (RB): claim CLEARED — on your roster [snapusa]" in _out)
     check("pending claims: claim lost to another roster -> FAILED",
@@ -2678,7 +2709,7 @@ try:
         check("pending claims: claimed player tagged on FA lines",
               "[CLAIM-PENDING]" in _out)
         check("pending claims: PENDING CLAIMS lists the claim target",
-              f"{_target_name} (FA): filed 2026-10-17 — expected " in _out)
+              f"{_target_name} (FA): filed {_fresh} — expected " in _out)
     if _target_assert_add:
         _sugg2 = re.search(r"  suggested moves:\n((?:  .*\n)+)", _out)
         _sugg2_lines = _sugg2.group(1) if _sugg2 else ""
@@ -2690,10 +2721,11 @@ try:
     _out_ww = run_board(WW).stdout
     check("pending claims: ww run sees only the ww row (per-league scoping)",
           "=== PENDING CLAIMS (your open claims" in _out_ww
-          and "WW Only (RB): filed 2026-10-17 — expected "
+          and f"WW Only (RB): filed {_fresh} — expected "
           "clears Tue ~12:02am PT" in _out_ww
           and "Synthetic Pending" not in _out_ww
-          and "Mine Player" not in _out_ww)
+          and "Mine Player" not in _out_ww
+          and "Stale Claim" not in _out_ww)
 finally:
     if _claims_orig is None:
         if os.path.exists(_claims_file):
