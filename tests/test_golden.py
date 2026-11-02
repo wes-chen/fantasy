@@ -255,9 +255,9 @@ check("bye tag: string bye coerced, garbage never tags",
       tb.on_bye_this_week_tag("8", 8).startswith(" [ON BYE W8")
       and tb.on_bye_this_week_tag("x", 8) == "")
 _src = open(os.path.join(SKILL, "bin", "trade_board.py")).read()
-check("bye tag: wired into all three suggestion-line constructions "
-      "(def + skill, K/DEF hurt, K/DEF upgrade)",
-      _src.count("on_bye_this_week_tag(") >= 4,
+check("bye tag: wired into all suggestion + proposal-line constructions "
+      "(def + skill, K/DEF hurt, K/DEF upgrade, 1-for-1 swap, 2-for-1)",
+      _src.count("on_bye_this_week_tag(") >= 6,
       f"count={_src.count('on_bye_this_week_tag(')}")
 
 # ---------------- E5: season-timing injury discount ----------------
@@ -2287,6 +2287,38 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               not _badbt, "; ".join(_badbt))
     except Exception as _ebt:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP suggested-move bye-tag biconditional ({tag}): {_ebt}")
+    # swap-row bye-week tag (2026-11-02): the CANDIDATE SWAPS / 2-FOR-1
+    # rows print [bye N] for the incoming player, but only the explicit
+    # tag says he scores zero THIS week. Biconditional off the row text
+    # itself: the first [bye N] after "you get" is the incoming player's
+    # (the sent side precedes "you get"), so no FP re-resolution needed.
+    # Vacuous on boards with no incoming bye tag (WW 2026-11-02 had none
+    # on bye this week) — the snapusa Olave row is the live firing case.
+    try:
+        _wk_msw = re.search(r"NFL Week (\d+)", out)
+        _wksw = int(_wk_msw.group(1)) if _wk_msw else None
+        if _wksw is None:
+            raise ValueError("no NFL week in board header")
+        _badsw, _checkedsw, _skippedsw = [], 0, 0
+        for _ln in out.splitlines():
+            if "you get" not in _ln or "[lineup" not in _ln:
+                continue
+            _seg = _ln.split("you get", 1)[1]
+            _mb = re.search(r"\[bye (\d+)\]", _seg)
+            if not _mb:
+                _skippedsw += 1
+                continue
+            _checkedsw += 1
+            _tagged = f"[ON BYE W{_wksw}" in _ln
+            if _tagged != (int(_mb.group(1)) == _wksw):
+                _badsw.append(f"incoming bye={_mb.group(1)} "
+                              f"week={_wksw} tagged={_tagged}: "
+                              f"{_ln.strip()[:120]}")
+        check(f"{tag}: swap-row [ON BYE] tag iff incoming bye == NFL week"
+              f" ({_checkedsw} checked, {_skippedsw} unresolvable)",
+              not _badsw, "; ".join(_badsw))
+    except Exception as _esw:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP swap-row bye-tag biconditional ({tag}): {_esw}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
