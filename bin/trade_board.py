@@ -982,16 +982,20 @@ def kdef_bye_replacement(fa_list, nfl_week, kdef_fp, kdef_byes):
 
 
 def on_bye_this_week_tag(bye_week, nfl_week):
-    """Suggested-move tag when the ADD is on bye this week (2026-10-26).
+    """Suggested-move / trade-proposal tag when the ADD is on bye this
+    week (2026-10-26 waiver moves, 2026-11-02 swap rows).
 
     A bye-week ADD scores zero this week. Tag only, never a veto: the
-    player can still be the right claim for rest-of-season value — but a
-    Monday claim for a player who can't start Sunday must say so on the
+    player can still be the right claim / trade target for rest-of-season
+    value — but a Monday claim for a player who can't start Sunday, or a
+    trade for a player who can't start this week, must say so on the
     actionable line. The WAIVER WIRE top-FA lines already show [bye N]
     via _btag; the suggested-move lines did not, so the line Wesley
-    acts on hid the one fact that changes the claim decision. The K/DEF
-    mirror of #30: #30 picks a non-bye replacement when HIS unit is on
-    bye; this tags the case where the RECOMMENDED unit is on bye."""
+    acts on hid the one fact that changes the claim decision, and the
+    same gap held on CANDIDATE SWAPS / 2-FOR-1 rows (a bare [bye N]
+    needs the reader to know the current week). The K/DEF mirror of #30:
+    #30 picks a non-bye replacement when HIS unit is on bye; this tags
+    the case where the RECOMMENDED unit is on bye."""
     try:
         if bye_week is not None and nfl_week is not None \
                 and int(bye_week) == int(nfl_week):
@@ -1449,9 +1453,15 @@ def main():
         lsig = low_signal_lateral(fdisplay(mine["id"]),
                                   fdisplay(theirs["id"]), delta,
                                   mine["val"], theirs["val"])
+        # 2026-11-02: mirror of the 2026-10-26 suggested-move tag — the
+        # row already prints [bye N] for the incoming player, but only
+        # the explicit tag says he scores zero THIS week (live case:
+        # the top snapusa row's Chris Olave, [bye 8] in NFL Week 8).
+        _obt = on_bye_this_week_tag(
+            fp.get(theirs["id"], (None, None, None))[0], nfl_week)
         return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}{_vtag(mine)}"
                        f" -> {partner}; "
-                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)} "
+                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_obt} "
                        f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}|"
                        f"{fairness_band(gap)}]{thin}{tag}{lsig}")
 
@@ -1861,11 +1871,14 @@ def main():
             alo, ahi = value_range(a["val"], ftrend(a["id"]))
             blo, bhi = value_range(b["val"], ftrend(b["id"]))
             tlo, thi = value_range(theirs["val"], ftrend(theirs["id"]))
+            # 2026-11-02: same incoming-on-bye-this-week tag as 1-for-1s.
+            _obt = on_bye_this_week_tag(
+                fp.get(theirs["id"], (None, None, None))[0], nfl_week)
             return (delta,
                     f"  you send {a['name']} ({a['val']}, {alo}-{ahi}) + "
                     f"{b['name']} ({b['val']}, {blo}-{bhi}){_btag(a)}{_vtag(a)}{_btag(b)}{_vtag(b)} -> "
                     f"{partner}; you get {theirs['name']} "
-                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)} "
+                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_obt} "
                     f"[lineup {delta:+.0f}{fit}][gap vs combined "
                     f"{gap:.0%}|{fairness_band(gap)}][frees 1 slot]{tag}")
 
