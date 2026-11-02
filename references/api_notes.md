@@ -199,6 +199,18 @@ veto or a reselection: unlike the K/DEF replacement case, a bye-week
 skill player can still be the right claim for rest-of-season value —
 the tag prices the week, it doesn't kill the move.
 
+### Swap-row bye-week tag (2026-11-02)
+
+Same gap on the trade side: CANDIDATE SWAPS and 2-FOR-1 rows printed
+`[bye N]` for the incoming player via `_btag`, but only the explicit
+tag says he scores zero THIS week — a bare bye number needs the reader
+to know the current NFL week. `on_bye_this_week_tag()` (FP overall
+feed's `player_bye_week` vs current week) now appends
+`[ON BYE W.. — scores zero this week]` to the incoming player on both
+proposal row types. Tag only, never a veto or a reselection — same
+reasoning as the waiver tag. Live case: the top snapusa row on
+2026-11-02 sent Okonkwo for Chris Olave, bye 8 in NFL Week 8.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
