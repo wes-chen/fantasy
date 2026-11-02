@@ -57,7 +57,11 @@ playoff-schedule weights apply only to the lineup-points delta (#19)), a
 >=10% since the previous board run (FantasyCalc reprices intraday on news —
 the 30-day trend can't see same-day moves; the fairness gap on a tagged row
 may be stale, re-check before sending), bye weeks and bye-stack
-warnings, and exactly who starts and who sits after the deal (the sent player is
+warnings, and an incoming player on bye this week carries
+`[ON BYE W.. — scores zero this week]` on the swap row itself (2026-11-02
+mirror of the waiver-move tag — a bare `[bye N]` needs the reader to know
+the current week; the top snapusa row's Chris Olave, bye 8 in NFL Week 8,
+was the live case), and exactly who starts and who sits after the deal (the sent player is
 gone, never listed as sitting; "sits" names only kept players who were
 starting and are now benched); lateral
 swaps where the incoming player can't crack his projected starting
