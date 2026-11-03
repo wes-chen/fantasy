@@ -52,7 +52,10 @@ league's largest accepted gap, which the LEAGUE TRADE HISTORY section
 prints as the live edge of the bands every run — the gap is always
 computed on raw FantasyCalc market values in both sections, so the band
 labels mean the same thing everywhere; injury discounts and G5
-playoff-schedule weights apply only to the lineup-points delta (#19)), a
+playoff-schedule weights apply only to the lineup-points delta (#19); every
+side of every swap row (1-for-1 and 2-for-1) carries its Sleeper injury
+designation as `[!STATUS]` — Questionable is playable, Out/IR/Doubtful/
+Suspended are already E5-discounted in the delta, and the tag names why), a
 `[PRICE +/-N% vs last board]` tag on any chip whose FantasyCalc value moved
 >=10% since the previous board run (FantasyCalc reprices intraday on news —
 the 30-day trend can't see same-day moves; the fairness gap on a tagged row
