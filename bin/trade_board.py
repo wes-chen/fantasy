@@ -1005,6 +1005,20 @@ def on_bye_this_week_tag(bye_week, nfl_week):
     return ""
 
 
+def injury_tag(inj):
+    """[!STATUS] tag for a Sleeper injury designation (2026-11-03).
+
+    Trade-proposal rows printed clean names even for an injured player:
+    the top 2026-11-03 snapusa row offered Michael Wilson (Questionable)
+    and row 3 offered Carnell Tate (Questionable) with no indication,
+    while top-FA and trending lines already carry [!STATUS]. Tag only,
+    never a veto: Questionable is playable, and Out/IR/Doubtful/Suspended
+    are already E5-discounted in the lineup delta — the tag names why
+    the delta moved, and flags the game-time risk on the player the row
+    says 'starts'."""
+    return f"[!{inj}]" if inj else ""
+
+
 def proposals_suppressed(nfl_week, trade_dl):
     """Post-deadline trade-proposal gate (ADV-FF-14 boundary, 2026-10-30).
 
@@ -1435,6 +1449,13 @@ def main():
         # previous board run — the fairness gap on this row may be stale
         return price_delta_tag(_fc_deltas.get(str(x["id"])))
 
+    def _itag(x):
+        # 2026-11-03: swap rows carry the same [!STATUS] tag as the
+        # top-FA / trending lines, on both sides of the deal.
+        return injury_tag(
+            ((players.get(str(x["id"]), {}) or {}).get("injury_status")
+             or ""))
+
     def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
         # #19: fairness gap on RAW market values (same basis as the
         # 2-for-1 section) — the bands are one calibrated language.
@@ -1459,9 +1480,9 @@ def main():
         # the top snapusa row's Chris Olave, [bye 8] in NFL Week 8).
         _obt = on_bye_this_week_tag(
             fp.get(theirs["id"], (None, None, None))[0], nfl_week)
-        return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}{_vtag(mine)}"
+        return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}{_vtag(mine)}{_itag(mine)}"
                        f" -> {partner}; "
-                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_obt} "
+                       f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_itag(theirs)}{_obt} "
                        f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}|"
                        f"{fairness_band(gap)}]{thin}{tag}{lsig}")
 
@@ -1728,6 +1749,9 @@ def main():
         print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since the "
               "previous board run (intraday repricing on news) — the fairness "
               "gap on that row may be stale; re-check before sending")
+        print("  [!STATUS] = Sleeper injury designation on that player "
+              "(Questionable is playable; Out/IR/Doubtful/Suspended are "
+              "already discounted in the delta)")
         if pw_active:
             print(f"  G5: deltas use playoff-weighted values "
                   f"(W15-17 SOS {_g5_range}"
@@ -1827,6 +1851,9 @@ def main():
         print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since "
               "the previous board run — the fairness gap on that row may be "
               "stale; re-check before sending")
+        print("  [!STATUS] = Sleeper injury designation on that player "
+              "(Questionable is playable; Out/IR/Doubtful/Suspended are "
+              "already discounted in the delta)")
 
         def swap_delta_2for1(mine_a, mine_b, theirs):
             """Lineup-points delta of sending two players for one.
@@ -1875,10 +1902,10 @@ def main():
             _obt = on_bye_this_week_tag(
                 fp.get(theirs["id"], (None, None, None))[0], nfl_week)
             return (delta,
-                    f"  you send {a['name']} ({a['val']}, {alo}-{ahi}) + "
-                    f"{b['name']} ({b['val']}, {blo}-{bhi}){_btag(a)}{_vtag(a)}{_btag(b)}{_vtag(b)} -> "
+                    f"  you send {a['name']} ({a['val']}, {alo}-{ahi}){_itag(a)} + "
+                    f"{b['name']} ({b['val']}, {blo}-{bhi}){_itag(b)}{_btag(a)}{_vtag(a)}{_btag(b)}{_vtag(b)} -> "
                     f"{partner}; you get {theirs['name']} "
-                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_obt} "
+                    f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_itag(theirs)}{_obt} "
                     f"[lineup {delta:+.0f}{fit}][gap vs combined "
                     f"{gap:.0%}|{fairness_band(gap)}][frees 1 slot]{tag}")
 
