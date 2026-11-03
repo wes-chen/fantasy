@@ -211,6 +211,21 @@ proposal row types. Tag only, never a veto or a reselection — same
 reasoning as the waiver tag. Live case: the top snapusa row on
 2026-11-02 sent Okonkwo for Chris Olave, bye 8 in NFL Week 8.
 
+### Swap-row injury tag (2026-11-03)
+
+Same gap, different axis: proposal rows printed clean names even for
+an injured player — the top 2026-11-03 snapusa row offered Michael
+Wilson (Questionable) and row 3 offered Carnell Tate (Questionable)
+with no indication, while top-FA and trending lines already carry
+`[!STATUS]`. `injury_tag()` (module-level pure helper; `_itag()`
+closure in `main()` resolves Sleeper `injury_status` from the players
+cache) now appends `[!STATUS]` to every side of every 1-for-1 and
+2-for-1 row, right after that player's values. Tag only, never a veto
+or reselection: Questionable is playable, and Out/IR/Doubtful/
+Suspended are already E5-discounted in the lineup delta — the tag
+names why the delta moved, and flags the game-time risk on the player
+the row says "starts".
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
