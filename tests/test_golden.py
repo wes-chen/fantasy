@@ -260,6 +260,24 @@ check("bye tag: wired into all suggestion + proposal-line constructions "
       _src.count("on_bye_this_week_tag(") >= 6,
       f"count={_src.count('on_bye_this_week_tag(')}")
 
+# ---------------- swap-row injury tag (2026-11-03) ----------------
+# Proposal rows printed clean names even for an injured incoming player
+# (live: Michael Wilson + Carnell Tate, both Questionable, atop the
+# 2026-11-03 snapusa board). Tag only, never a veto.
+check("injury tag: Questionable renders [!Questionable]",
+      tb.injury_tag("Questionable") == "[!Questionable]")
+check("injury tag: Out/IR/Doubtful/Suspended render verbatim",
+      tb.injury_tag("Out") == "[!Out]"
+      and tb.injury_tag("IR") == "[!IR]"
+      and tb.injury_tag("Doubtful") == "[!Doubtful]"
+      and tb.injury_tag("Suspended") == "[!Suspended]")
+check("injury tag: empty/None renders nothing (no phantom tag)",
+      tb.injury_tag("") == "" and tb.injury_tag(None) == "")
+check("injury tag: wired into both proposal-row constructions "
+      "(1-for-1 sent + incoming, 2-for-1 a + b + incoming)",
+      _src.count("_itag(") >= 6,
+      f"count={_src.count('_itag(')}")
+
 # ---------------- E5: season-timing injury discount ----------------
 _approx = lambda got, want: abs(got - want) < 1e-9
 check("E5: Out wk3 -> 0.5 (no timing decay)",
@@ -2319,6 +2337,48 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               not _badsw, "; ".join(_badsw))
     except Exception as _esw:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP swap-row bye-tag biconditional ({tag}): {_esw}")
+    # swap-row injury tag (2026-11-03): every side of every proposal row
+    # carries [!STATUS] iff that player carries a Sleeper designation in
+    # the players cache the board itself read. Segment-scoped multiset
+    # comparison (sent before "you get" vs incoming after it), so a
+    # Questionable sent player can't false-pass a healthy incoming one.
+    # Live firing case 2026-11-03: Michael Wilson + Carnell Tate, both
+    # Questionable, atop the snapusa board.
+    try:
+        _pdb_it = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _inj_by_name = {_pp["full_name"]: (_pp.get("injury_status") or "")
+                        for _pp in _pdb_it.values()
+                        if isinstance(_pp, dict) and _pp.get("full_name")}
+        _badit, _checkedit, _skippedit = [], 0, 0
+        for _ln in out.splitlines():
+            if "you get" not in _ln or "[lineup" not in _ln:
+                continue
+            _sent_seg, _inc_seg = _ln.split("you get", 1)
+            for _seg in (_sent_seg, _inc_seg):
+                # strip the "you send " prefix first: without it the lazy
+                # name pattern swallows it ("you send Chig Okonkwo") and
+                # the segment wrongly counts as unresolvable.
+                _seg_src = (_seg.split("you send", 1)[1]
+                            if "you send" in _seg else _seg)
+                _names = re.findall(
+                    r"([A-Za-z][A-Za-z'.\- ]*?) \(\d[\d,]*, ", _seg_src)
+                if not _names or any(n not in _inj_by_name
+                                     for n in _names):
+                    _skippedit += 1
+                    continue
+                _checkedit += 1
+                _want = sorted(_inj_by_name[n] for n in _names
+                               if _inj_by_name[n])
+                _got = sorted(re.findall(r"\[!([^\]]+)\]", _seg))
+                if _want != _got:
+                    _badit.append(f"{_names} want={_want} got={_got}: "
+                                  f"{_ln.strip()[:120]}")
+        check(f"{tag}: swap-row [!STATUS] tags match Sleeper designations"
+              f" ({_checkedit} segments checked, {_skippedit} unresolvable)",
+              not _badit, "; ".join(_badit))
+    except Exception as _eit:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP swap-row injury-tag biconditional ({tag}): {_eit}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
