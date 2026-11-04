@@ -226,6 +226,18 @@ Suspended are already E5-discounted in the lineup delta — the tag
 names why the delta moved, and flags the game-time risk on the player
 the row says "starts".
 
+### Roster + hole-line injury tag (2026-11-04)
+
+Same gap, remaining surfaces: YOUR ROSTER lines and HOLE-CREATING
+lines still printed clean names — the at-a-glance view and the
+hole-pricing surface, which the persona reads before any proposal row.
+The same `_itag()` closure now appends `[!STATUS]` to every roster
+line (all six positions, K/DEF included) and every hole-creating line.
+Tag only, never a veto or reselection, same as the swap-row tag. Live
+cases on the 2026-11-04 snapusa board: Joe Fagnano `[!Out]` and
+Davante Adams `[!IR]` on the roster lines; the hole line (Dak
+Prescott, healthy) correctly untagged.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
