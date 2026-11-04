@@ -21,7 +21,9 @@ same bye carry a `[BYE-STACK W..]` warning right in the roster lines — and,
 from Week 5, G5 playoff-schedule tags `[P+]`/`[P-]` weighting the W15-17
 slate x0.9-1.1). K and DEF get their own roster lines, priced by
 FantasyPros ROS rank like the waiver lines, with an [ON BYE W..] tag when
-the unit's bye is this week (#30); a defense renders as
+the unit's bye is this week (#30); every roster line (all six positions)
+and every hole-creating line carries the player's Sleeper injury
+designation as `[!STATUS]` (2026-11-04 mirror of the swap-row tag); a defense renders as
 "San Francisco 49ers DEF" (Sleeper stores DEFs with full_name=None, and
 the old bare-abbrev fallback read as a missing defense in chat), a
 bye-week audit, a coverage-gap audit (14-team leagues only: starting-slot
