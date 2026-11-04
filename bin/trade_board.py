@@ -1015,7 +1015,10 @@ def injury_tag(inj):
     never a veto: Questionable is playable, and Out/IR/Doubtful/Suspended
     are already E5-discounted in the lineup delta — the tag names why
     the delta moved, and flags the game-time risk on the player the row
-    says 'starts'."""
+    says 'starts'. Mirrored 2026-11-04 onto YOUR ROSTER lines (all six
+    positions) and HOLE-CREATING lines — the same clean-name gap on
+    the at-a-glance view and the hole-pricing surface, which the
+    persona reads before any proposal row."""
     return f"[!{inj}]" if inj else ""
 
 
@@ -1548,7 +1551,7 @@ def main():
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
-            f"{x['name']}({x['val']}){_btag(x)}{ptag_of(x['id'])}"
+            f"{x['name']}({x['val']}){_btag(x)}{_itag(x)}{ptag_of(x['id'])}"
             + ("[ON-BLOCK: pending offer to %s]" % onblock[x["id"]]["partner"]
                if x["id"] in onblock else "")
             for x in pls))
@@ -1566,7 +1569,7 @@ def main():
             _onbye = ("[ON BYE W%d]" % nfl_week
                       if kdef_byes.get(x["id"]) == nfl_week else "")
             return (f"{x['name']}({'FP-ROS #' + str(_r) if _r else 'unpriced'})"
-                    f"{_btag(x)}{_onbye}{ptag_of(x['id'])}"
+                    f"{_btag(x)}{_onbye}{_itag(x)}{ptag_of(x['id'])}"
                     + ("[ON-BLOCK: pending offer to %s]"
                        % onblock[x["id"]]["partner"]
                        if x["id"] in onblock else ""))
@@ -1956,7 +1959,7 @@ def main():
         suitors = [st["name"] for rid, st in teams.items()
                    if rid != my_rid and need_score(st).get(mp, 0) > 0]
         if suitors:
-            print(f"  {mine['name']} ({mine['val']}) -> "
+            print(f"  {mine['name']} ({mine['val']}){_itag(mine)} -> "
                   f"{', '.join(suitors)} need {mp}; "
                   f"trading him leaves you with "
                   f"{me['startable'].get(mp, 0) - 1} startable {mp}")
