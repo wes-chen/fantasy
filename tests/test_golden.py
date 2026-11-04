@@ -2379,6 +2379,59 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               not _badit, "; ".join(_badit))
     except Exception as _eit:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP swap-row injury-tag biconditional ({tag}): {_eit}")
+    # roster + hole-line injury tag (2026-11-04 mirror of the swap-row
+    # tag): every YOUR ROSTER player segment and every HOLE-CREATING
+    # line carries [!STATUS] iff that player carries a Sleeper
+    # designation in the players cache the board itself read. DEF
+    # segments never resolve (Sleeper stores DEFs with full_name=None)
+    # and count as unresolvable, like the swap pin's skips.
+    try:
+        _pdb_rh = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _inj_rh = {_pp["full_name"]: (_pp.get("injury_status") or "")
+                   for _pp in _pdb_rh.values()
+                   if isinstance(_pp, dict) and _pp.get("full_name")}
+        _badrh, _checkedrh, _skippedrh = [], 0, 0
+        for _ln in _ros29.splitlines():
+            _mpos = re.match(r"  (QB|RB|WR|TE|K|DEF): (.*)$", _ln)
+            if not _mpos:
+                continue
+            for _seg in _mpos.group(2).split(", "):
+                _mn = re.match(r"([A-Za-z][A-Za-z'.\- ]*?)\(", _seg)
+                if not _mn or _mn.group(1) not in _inj_rh:
+                    _skippedrh += 1
+                    continue
+                _checkedrh += 1
+                _want = [_inj_rh[_mn.group(1)]] \
+                    if _inj_rh[_mn.group(1)] else []
+                _got = re.findall(r"\[!([^\]]+)\]", _seg)
+                if _want != _got:
+                    _badrh.append(f"{_mn.group(1)} want={_want} "
+                                  f"got={_got}: {_seg[:100]}")
+        _holesec = out.split(
+            "=== HOLE-CREATING OPTIONS (persona must price the roster "
+            "cost) ===")[1].split("===")[0]
+        for _ln in _holesec.splitlines():
+            if " -> " not in _ln:
+                continue
+            _mh = re.match(r"  ([A-Za-z][A-Za-z'.\- ]*?) \(\d", _ln)
+            if not _mh or _mh.group(1) not in _inj_rh:
+                _skippedrh += 1
+                continue
+            _checkedrh += 1
+            _want = [_inj_rh[_mh.group(1)]] \
+                if _inj_rh[_mh.group(1)] else []
+            _got = re.findall(r"\[!([^\]]+)\]",
+                              _ln.split(" -> ", 1)[0])
+            if _want != _got:
+                _badrh.append(f"{_mh.group(1)} want={_want} "
+                              f"got={_got}: {_ln.strip()[:100]}")
+        check(f"{tag}: roster + hole [!STATUS] tags match Sleeper "
+              f"designations ({_checkedrh} checked, {_skippedrh} "
+              f"unresolvable)", not _badrh, "; ".join(_badrh))
+    except Exception as _erh:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP roster/hole injury-tag biconditional ({tag}): "
+              f"{_erh}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
