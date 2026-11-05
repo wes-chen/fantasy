@@ -98,6 +98,11 @@ week); and the mirror case — a suggested ADD who is himself on bye this
 week carries [ON BYE W.. — scores zero this week] on the move line, so a
 Monday claim for a player who can't start Sunday says so (tag only, never
 a veto: the player can still be the right claim for rest-of-season value),
+and the G5 playoff-schedule tag on the same lines — every top-FA line
+and every suggested ADD carries `[P+ soft]`/`[P- brutal]`/`[PLAYOFF BYE
+W..]` from Week 5, so a Monday claim sees the W15-17 lens without a
+manual rerun (the Nov 4 BTJ case: the board ranked him on value alone
+while the playoff slate was the tiebreak Wesley had to ask for),
 trending velocity
 (G3 — Sleeper-wide adds: this scan's 24h adds vs adds over the gap
 since the previous scan, from our own timestamped snapshot history:
