@@ -2305,6 +2305,98 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               not _badbt, "; ".join(_badbt))
     except Exception as _ebt:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP suggested-move bye-tag biconditional ({tag}): {_ebt}")
+    # Waiver P-tag (2026-11-05): every top-FA segment and every
+    # suggested-move ADD carries the G5 [P+]/[P-] tag iff the recomputed
+    # playoff multiplier says so — the Nov 4 BTJ case, where the wire
+    # lines hid the playoff lens Wesley had to ask for by hand. Ground
+    # truth is fi.playoff_multipliers over the same live nflverse files
+    # the board read (24h cache, so the recompute is stable); players
+    # with no nflverse stats expect "". Guarded: SKIP when the nflverse
+    # recompute fails here. Live firing case 2026-11-05: the WW board's
+    # top-FA lines (wide band) tag Lawrence/Dak/Golden/Kincaid [P+ soft]
+    # and Jacobs [P- brutal]; snapusa's wire is all-neutral that day.
+    try:
+        _wk_mpt = re.search(r"NFL Week (\d+)", out)
+        _wkpt = int(_wk_mpt.group(1)) if _wk_mpt else None
+        if _wkpt is None:
+            raise ValueError("no NFL week in board header")
+        _plpt = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _namespt, _duppt = {}, set()
+        for _sid, _p in _plpt.items():
+            _fn = (_p or {}).get("full_name")
+            if not _fn:
+                continue
+            if _fn in _namespt:
+                _duppt.add(_fn)
+            _namespt[_fn] = _sid
+        for _d in _duppt:
+            _namespt.pop(_d, None)
+        _lgpt = tb.get(f"https://api.sleeper.app/v1/league/{league}")
+        _pspt = ((_lgpt.get("settings") or {}).get("playoff_week_start")
+                 or 15)
+        _nvppt = fi.nflverse_paths(keys=("stats", "snaps", "games",
+                                         "depth"))
+        _uspt = fi.load_usage(_nvppt["stats"], _nvppt["snaps"])
+        _tept = {k: (v["team"], v["pos"]) for k, v in _uspt.items()}
+        _pwpt = fi.playoff_multipliers(
+            _nvppt["games"], _nvppt["stats"], _tept,
+            tuple(range(_pspt, 19)),
+            wide=(_wkpt >= 8 and tag == "weekend-warriors"))
+        _activept = tb.g5_active(_wkpt, _pwpt)
+
+        def _want_pt(_name):
+            _sid = _namespt.get(_name)
+            if _sid is None:
+                return "missing"
+            _p = _plpt.get(_sid) or {}
+            if not _activept:
+                return ""
+            return _pwpt.get((tb.norm_name(_name), _p.get("team"),
+                              _p.get("position")), (1.0, ""))[1]
+
+        _pt_re = re.compile(r"(\[P\+ soft\]|\[P\- brutal\]|"
+                            r"\[PLAYOFF BYE W\d+\])")
+        _badpt, _checkedpt, _skippedpt = [], 0, 0
+        for _ln in out.splitlines():
+            _mt = re.match(r"  top FA (QB|RB|WR|TE|K|DEF): (.*)$", _ln)
+            if not _mt:
+                continue
+            for _seg in _mt.group(2).split(", "):
+                if _seg in ("(none)", ""):
+                    continue
+                _mn = re.match(r"([A-Za-z][A-Za-z'.\- ]*?)\(", _seg)
+                if not _mn:
+                    _skippedpt += 1
+                    continue
+                _want = _want_pt(_mn.group(1).strip())
+                if _want == "missing":
+                    _skippedpt += 1
+                    continue
+                _checkedpt += 1
+                _got = _pt_re.findall(_seg)
+                if ([_want] if _want else []) != _got:
+                    _badpt.append(f"{_mn.group(1)} want={_want!r} "
+                                  f"got={_got}: {_seg[:100]}")
+        for _ln in _suggested_moves_of(out):
+            _m = re.match(r"  ADD (.+?) \((QB|RB|WR|TE),", _ln)
+            if not _m:
+                continue
+            _seg = _ln.split(" / DROP ", 1)[0]
+            _want = _want_pt(_m.group(1).strip())
+            if _want == "missing":
+                _skippedpt += 1
+                continue
+            _checkedpt += 1
+            _got = _pt_re.findall(_seg)
+            if ([_want] if _want else []) != _got:
+                _badpt.append(f"{_m.group(1)} want={_want!r} "
+                              f"got={_got}: {_seg[:120]}")
+        check(f"{tag}: waiver [P+]/[P-] tags match the playoff-SOS "
+              f"recompute ({_checkedpt} checked, {_skippedpt} "
+              f"unresolvable)", not _badpt, "; ".join(_badpt))
+    except Exception as _ept:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP waiver P-tag biconditional ({tag}): {_ept}")
     # swap-row bye-week tag (2026-11-02): the CANDIDATE SWAPS / 2-FOR-1
     # rows print [bye N] for the incoming player, but only the explicit
     # tag says he scores zero THIS week. Biconditional off the row text
