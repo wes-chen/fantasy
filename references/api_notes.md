@@ -238,6 +238,26 @@ cases on the 2026-11-04 snapusa board: Joe Fagnano `[!Out]` and
 Davante Adams `[!IR]` on the roster lines; the hole line (Dak
 Prescott, healthy) correctly untagged.
 
+### Waiver P-tag (2026-11-05)
+
+Same gap, waiver side: the G5 `[P+ soft]`/`[P- brutal]` tag lived only
+on YOUR ROSTER lines and inside swap deltas, while the waiver lines —
+the Monday-claim surface — showed value alone. On Nov 4 Wesley had to
+ask for a manual rerun to rank wire options by playoff schedule; under
+that lens Brian Thomas Jr. jumped to #1 over Chris Bell on
+Jacksonville's soft W15-17 WR slate. The existing `ptag_of()` closure
+now appends the tag to every top-FA segment (`_fa_fmt`) and to the ADD
+segment of every skill-position suggested move (K/DEF lines are a
+no-op: G5 never tags those positions). Tag only, never a veto or a
+reselection, and it never moves the suggestion ranking — the tag
+thresholds (narrow band [P+] >= 1.05 / [P-] <= 0.95; wide band
+>= 1.10 / <= 0.90) only fire on extreme slates, so a mildly soft slate
+like BTJ's 1.026 stays untagged. Live cases on the 2026-11-05 WW board
+(wide band): Trevor Lawrence, Dak Prescott, Matthew Golden, Dalton
+Kincaid `[P+ soft]`, Josh Jacobs `[P- brutal]`; the snapusa wire was
+all-neutral that day. The legend line now says waiver ADDs carry the
+same tag.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
