@@ -1547,7 +1547,8 @@ def main():
     if pw_active:
         print("  [P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal — "
               f"swap deltas below use playoff-weighted values ({_g5_range}"
-              + (", E12 endgame ceiling mode" if _wide else "") + ")")
+              + (", E12 endgame ceiling mode" if _wide else "")
+              + "; waiver ADDs carry the same tag)")
     for p in ("QB", "RB", "WR", "TE"):
         pls = me["bypos"].get(p, [])
         print(f"  {p}: " + ", ".join(
@@ -2046,7 +2047,8 @@ def main():
                 val = fstr(pid_s, v)
             return (f"{n}({val}){_btag({'id': pid_s})}"
                     + (f"[!{inj}]" if inj else "")
-                    + ("[CLAIM-PENDING]" if pid_s in claims else ""))
+                    + ("[CLAIM-PENDING]" if pid_s in claims else "")
+                    + ptag_of(pid_s))
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
                         for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
@@ -2322,7 +2324,8 @@ def main():
                            if closes_coverage_gap(pos, b["pos"],
                                                   _cov_gap_poses)
                            else "")
-                _ln = (f"  ADD {fan} ({pos},{fstr(fapid, fav)}) / "
+                _ln = (f"  ADD {fan} ({pos},{fstr(fapid, fav)})"
+                       f"{ptag_of(fapid)} / "
                        f"DROP {b['name']} ({b['pos']},{b['val']})"
                        + _pathtag(_p, fapid) + _closes
                        + on_bye_this_week_tag(
