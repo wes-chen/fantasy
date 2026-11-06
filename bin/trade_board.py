@@ -1018,7 +1018,11 @@ def injury_tag(inj):
     says 'starts'. Mirrored 2026-11-04 onto YOUR ROSTER lines (all six
     positions) and HOLE-CREATING lines — the same clean-name gap on
     the at-a-glance view and the hole-pricing surface, which the
-    persona reads before any proposal row."""
+    persona reads before any proposal row. Mirrored 2026-11-06 onto
+    the G1 usage-gap radar lines (HOLD/SHOP/TARGET/WIRE): the G1 veto
+    already excludes Out/IR/Doubtful/Suspended, so a tag there can
+    only be Questionable — but a buy-the-usage line on a player who
+    may not play reads very differently untagged."""
     return f"[!{inj}]" if inj else ""
 
 
@@ -1675,6 +1679,9 @@ def main():
     print("=== USAGE-GAP RADAR (G1: nflverse usage vs fantasy output) ===")
     print("  routes are unavailable in every free source — target share + "
           "air-yards share + snap% are the route proxies, never synthesized")
+    print("  [!STATUS] = Sleeper injury designation (Questionable is "
+          "playable; Out/IR/Doubtful/Suspended are already excluded "
+          "from the radar)")
     buy_low_sids = set()  # stashed for the G8 clog audit
     recent_sids = set()   # last-game role shield, same consumer
     try:
@@ -1716,7 +1723,18 @@ def main():
                 continue
             (_tgt if _sid in rostered else _wire).append(b)
         def _u1(b):
-            return (f"{b['name']} ({b['pos']},{b['team']}) "
+            # 2026-11-06: radar lines carry the same [!STATUS] tag as the
+            # swap / roster / top-FA lines. The G1 veto already excludes
+            # Out/IR/Doubtful/Suspended, so a tag here can only be
+            # Questionable — but a buy-the-usage line on a player who may
+            # not play reads very differently untagged (live case: A.J.
+            # Brown, Questionable, missed Week 8, on both boards today).
+            # Tag only, never a veto or a reselection.
+            _sid = sid_of_nkey(b["nkey"])
+            _it = injury_tag(
+                ((players.get(str(_sid), {}) or {}).get("injury_status")
+                 or "") if _sid else "")
+            return (f"{b['name']} ({b['pos']},{b['team']}){_it} "
                     f"usage-implied {b['exp']} vs actual {b['ppg']} "
                     f"(gap {b['gap']:+.1f}, {b['note']})")
         if _hold:
