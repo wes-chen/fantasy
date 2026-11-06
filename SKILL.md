@@ -40,7 +40,12 @@ section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated R
 (G1 — nflverse usage vs fantasy output: buy-low/sell-high on target
 share, air-yards share, snap%; routes are unavailable in every free
 source and are never synthesized; players flagged Out/IR/Doubtful/
-Suspended are excluded from the radar entirely (#28); a last-game
+Suspended are excluded from the radar entirely (#28), and radar lines
+carry the player's Sleeper injury designation as `[!STATUS]`
+(2026-11-06 mirror of the swap-row tag — the veto already excludes
+Out/IR/Doubtful/Suspended, so a tag here is Questionable, and a
+buy-the-usage line on a player who may not play reads differently
+untagged); a last-game
 role shield (G1 add-on, 2026-10-19 Perine post-mortem) also protects
 bench players whose most recent game shows a live role (>=8
 touches or >=40% snaps) from being named as waiver drops — a season
