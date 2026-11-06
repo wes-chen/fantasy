@@ -258,6 +258,22 @@ Kincaid `[P+ soft]`, Josh Jacobs `[P- brutal]`; the snapusa wire was
 all-neutral that day. The legend line now says waiver ADDs carry the
 same tag.
 
+### Radar injury tag (2026-11-06)
+
+Same gap, radar surface: the G1 usage-gap lines (HOLD/SHOP/TARGET/
+WIRE) printed bare names even for a Questionable player — the veto
+already excludes Out/IR/Doubtful/Suspended from the radar, so a tag
+here can only be Questionable, but a buy-the-usage line on a player
+who may not play reads very differently untagged. The `_u1`
+formatter now appends `injury_tag()` (Sleeper `injury_status` via
+`sid_of_nkey`) right after the `(POS,TEAM)` parenthetical, plus a
+legend line in the radar header. Tag only, never a veto or a
+reselection — Questionable is playable, and the usage signal is still
+real; the tag names the game-time risk on the buy-low. Live cases on
+the 2026-11-06 boards: A.J. Brown `[!Questionable]` (missed Week 8,
+DNP Wed, TBD vs GB Sun) on both boards, Dontayvion Wicks
+`[!Questionable]` on snapusa.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
