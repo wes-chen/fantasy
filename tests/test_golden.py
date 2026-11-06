@@ -277,6 +277,13 @@ check("injury tag: wired into both proposal-row constructions "
       "(1-for-1 sent + incoming, 2-for-1 a + b + incoming)",
       _src.count("_itag(") >= 6,
       f"count={_src.count('_itag(')}")
+# Radar mirror (2026-11-06): the G1 usage-gap formatter `_u1` calls
+# injury_tag() directly (not via _itag — radar players arrive as nflverse
+# rows, resolved through sid_of_nkey). Three call sites total: the def,
+# _itag, and _u1.
+check("injury tag: radar formatter calls injury_tag (2026-11-06)",
+      _src.count("injury_tag(") >= 3,
+      f"count={_src.count('injury_tag(')}")
 
 # ---------------- E5: season-timing injury discount ----------------
 _approx = lambda got, want: abs(got - want) < 1e-9
@@ -2524,6 +2531,45 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     except Exception as _erh:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP roster/hole injury-tag biconditional ({tag}): "
               f"{_erh}")
+    # radar injury tag (2026-11-06 mirror): every G1 usage-gap line
+    # (HOLD/SHOP/TARGET/WIRE) carries [!STATUS] iff that player carries
+    # a Sleeper designation in the players cache the board itself read.
+    # The G1 veto already excludes Out/IR/Doubtful/Suspended, so a tag
+    # here can only be Questionable in practice — the biconditional
+    # still checks the designation itself, not the status class.
+    # Live firing cases 2026-11-06: A.J. Brown [!Questionable] on both
+    # boards, Dontayvion Wicks [!Questionable] on snapusa.
+    try:
+        _pdb_g1 = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _inj_g1 = {_pp["full_name"]: (_pp.get("injury_status") or "")
+                   for _pp in _pdb_g1.values()
+                   if isinstance(_pp, dict) and _pp.get("full_name")}
+        _radar_sec = out.split(
+            "=== USAGE-GAP RADAR (G1: nflverse usage vs fantasy "
+            "output) ===")[1].split("===")[0]
+        _badg1, _checkedg1, _skippedg1 = [], 0, 0
+        for _ln in _radar_sec.splitlines():
+            if "usage-implied" not in _ln:
+                continue
+            for _m in re.finditer(
+                    r"([A-Za-z][A-Za-z'.\- ]*?) \([A-Z]+,[A-Z]+\)"
+                    r"(\[!([^\]]+)\])? usage-implied", _ln):
+                _nm = _m.group(1)
+                if _nm not in _inj_g1:
+                    _skippedg1 += 1
+                    continue
+                _checkedg1 += 1
+                _want = [_inj_g1[_nm]] if _inj_g1[_nm] else []
+                _got = [_m.group(3)] if _m.group(3) else []
+                if _want != _got:
+                    _badg1.append(f"{_nm} want={_want} got={_got}: "
+                                  f"{_ln.strip()[:120]}")
+        check(f"{tag}: radar [!STATUS] tags match Sleeper designations"
+              f" ({_checkedg1} checked, {_skippedg1} unresolvable)",
+              not _badg1, "; ".join(_badg1))
+    except Exception as _eg1:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP radar injury-tag biconditional ({tag}): {_eg1}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
