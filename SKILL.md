@@ -36,7 +36,9 @@ Questionable or worse, and a waiver suggestion that closes a gap is tagged
 `[closes TE coverage gap]` or `[closes QB coverage gap]`), a 4-week bye-crater forecast (G9 —
 2+ projected starters on the same bye flagged), a value-divergence
 section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated ROS feed only, never draft ranks (gh #24); |diff|
->= 12 spots flagged as hold/buy-low or sell-high; players flagged Out/IR/Doubtful/Suspended are excluded with a count — the two feeds reprice the same injury news on different schedules, so a divergence there is a staleness artifact, not a signal (the 2026-10-21 Adams case; same veto as G1 #28)), a usage-gap radar
+>= 12 spots flagged as hold/buy-low or sell-high; players flagged Out/IR/Doubtful/Suspended are excluded with a count — the two feeds reprice the same injury news on different schedules, so a divergence there is a staleness artifact, not a signal (the 2026-10-21 Adams case; same veto as G1 #28); flagged
+lines carry [!STATUS] — Questionable only in practice, the veto already
+excludes the rest (2026-11-07 mirror)), a usage-gap radar
 (G1 — nflverse usage vs fantasy output: buy-low/sell-high on target
 share, air-yards share, snap%; routes are unavailable in every free
 source and are never synthesized; players flagged Out/IR/Doubtful/
@@ -150,7 +152,8 @@ G1 above), and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
 named as drops; the suggested ADD/DROP pairs draw their DROP from the
 same protected pool, so the two sections never disagree on who is
-droppable)).
+droppable; clog lines and DROP CANDIDATES carry [!STATUS] (2026-11-07
+mirror of the swap-row tag)).
 A `=== PENDING OFFERS ===` section (ADV-FF-07) prints Wesley's own open
 offers and marks those players `[ON-BLOCK: ...]` in the roster — on-block
 is per-league (gh #26): an open snapusa offer never blocks the same player
