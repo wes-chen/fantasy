@@ -274,6 +274,26 @@ the 2026-11-06 boards: A.J. Brown `[!Questionable]` (missed Week 8,
 DNP Wed, TBD vs GB Sun) on both boards, Dontayvion Wicks
 `[!Questionable]` on snapusa.
 
+### G8 clog-audit + divergence injury tag (2026-11-07)
+
+Same gap, last two bare-name surfaces: the G8 roster-clog lines
+(incl. DROP CANDIDATES) and the value-divergence lines still printed
+clean names — the drop surface and the sell-high surface, which the
+persona reads before any proposal row. The G8 render appends
+`injury_tag()` (designation already carried in the ranked dicts'
+`"inj"` field) after the contingent-value parenthetical, and the
+DROP CANDIDATES line rebuilds its names from the ranked dicts so the
+tag follows there too; `value_divergences()` appends the tag right
+after the player's name, plus a legend line under the section header.
+Tag only, never a veto or a reselection. The divergence veto already
+excludes Out/IR/Doubtful/Suspended, so a tag there is Questionable;
+a G8 line can show Out (an Out bench player is droppable, but the
+tag names why he is cheap). Live cases on the 2026-11-07 boards: A.J.
+Brown `[!Out]` on the WW clog audit (and on the DROP CANDIDATES line
+— he was Questionable when the radar tagged him yesterday; the knee
+flare-up has since ruled him out); the snapusa divergence lines were
+all-healthy today, with 1 injured player excluded by the veto.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
