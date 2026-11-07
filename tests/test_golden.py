@@ -279,10 +279,11 @@ check("injury tag: wired into both proposal-row constructions "
       f"count={_src.count('_itag(')}")
 # Radar mirror (2026-11-06): the G1 usage-gap formatter `_u1` calls
 # injury_tag() directly (not via _itag — radar players arrive as nflverse
-# rows, resolved through sid_of_nkey). Three call sites total: the def,
-# _itag, and _u1.
+# rows, resolved through sid_of_nkey). Six call sites total: the def,
+# _itag, _u1, value_divergences, and the two G8 render sites (ranked
+# lines + DROP CANDIDATES) added 2026-11-07.
 check("injury tag: radar formatter calls injury_tag (2026-11-06)",
-      _src.count("injury_tag(") >= 3,
+      _src.count("injury_tag(") >= 6,
       f"count={_src.count('injury_tag(')}")
 
 # ---------------- E5: season-timing injury discount ----------------
@@ -2570,6 +2571,81 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               not _badg1, "; ".join(_badg1))
     except Exception as _eg1:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP radar injury-tag biconditional ({tag}): {_eg1}")
+    # G8 clog-audit + divergence injury tag (2026-11-07 mirror): every
+    # G8 ranked line and DROP CANDIDATES name, and every
+    # value-divergence line, carries [!STATUS] iff that player carries
+    # a Sleeper designation in the players cache the board itself read.
+    # The divergence veto already excludes Out/IR/Doubtful/Suspended,
+    # so a tag there can only be Questionable; a G8 line can show Out
+    # (an Out bench player is droppable, but the tag names why he is
+    # cheap). DEF segments never resolve (full_name=None) and count as
+    # unresolvable, like the roster pin's skips.
+    try:
+        _pdb_g8 = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _inj_g8 = {_pp["full_name"]: (_pp.get("injury_status") or "")
+                   for _pp in _pdb_g8.values()
+                   if isinstance(_pp, dict) and _pp.get("full_name")}
+        _badg8, _checkedg8, _skippedg8 = [], 0, 0
+        _g8sec2 = out.split(
+            "roster-clog audit (G8")[1].split("===")[0]
+        for _ln in _g8sec2.splitlines():
+            _mg = re.match(
+                r"^\s{4}(.+?) \([A-Z]+,[0-9.]+ -> contingent [0-9.]+\)"
+                r"(\[!([^\]]+)\])?", _ln)
+            if _mg:
+                _nm = _mg.group(1)
+                if _nm not in _inj_g8:
+                    _skippedg8 += 1
+                    continue
+                _checkedg8 += 1
+                _want = [_inj_g8[_nm]] if _inj_g8[_nm] else []
+                _got = [_mg.group(3)] if _mg.group(3) else []
+                if _want != _got:
+                    _badg8.append(f"{_nm} want={_want} got={_got}: "
+                                  f"{_ln.strip()[:120]}")
+                continue
+            if _ln.strip().startswith("DROP CANDIDATES: "):
+                for _seg in _ln.split("DROP CANDIDATES: ", 1)[1].split(", "):
+                    _md = re.match(
+                        r"([A-Za-z][A-Za-z'.\- ]*?)(\[!([^\]]+)\])?$",
+                        _seg.strip())
+                    if not _md or _md.group(1) not in _inj_g8:
+                        _skippedg8 += 1
+                        continue
+                    _checkedg8 += 1
+                    _want = [_inj_g8[_md.group(1)]] \
+                        if _inj_g8[_md.group(1)] else []
+                    _got = [_md.group(3)] if _md.group(3) else []
+                    if _want != _got:
+                        _badg8.append(f"{_md.group(1)} want={_want} "
+                                      f"got={_got}: {_seg[:100]}")
+        _dvsec = out.split(
+            "=== VALUE DIVERGENCE (FantasyPros ECR rank vs FantasyCalc "
+            "rank) ===")[1].split("===")[0]
+        for _ln in _dvsec.splitlines():
+            _mv = re.match(
+                r"^  ([A-Za-z][A-Za-z'.\- ]*?)(\[!([^\]]+)\])?: "
+                r"ECR \d+ vs FC #\d+ -> ", _ln)
+            if not _mv:
+                continue
+            if _mv.group(1) not in _inj_g8:
+                _skippedg8 += 1
+                continue
+            _checkedg8 += 1
+            _want = [_inj_g8[_mv.group(1)]] \
+                if _inj_g8[_mv.group(1)] else []
+            _got = [_mv.group(3)] if _mv.group(3) else []
+            if _want != _got:
+                _badg8.append(f"{_mv.group(1)} want={_want} got={_got}: "
+                              f"{_ln.strip()[:120]}")
+        check(f"{tag}: G8 + divergence [!STATUS] tags match Sleeper "
+              f"designations ({_checkedg8} checked, {_skippedg8} "
+              f"unresolvable)",
+              not _badg8, "; ".join(_badg8))
+    except Exception as _eg8:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP G8/divergence injury-tag biconditional ({tag}): "
+              f"{_eg8}")
     # coverage-gap audit (2026-10-18): a starting-slot position with no
     # eligible backup. In the 4-team league the wire replaces a scratch
     # the same morning, so the audit stays silent there; in the 14-team
@@ -3497,6 +3573,14 @@ check("divergence: IR player excluded too",
 check("divergence: Questionable player still flagged",
       any("Questionable Player" in ln and "CALC HIGHER" in ln
           for ln in _dv_lines))
+check("divergence: Questionable line carries [!Questionable] (2026-11-07)",
+      any("Questionable Player[!Questionable]:" in ln
+          for ln in _dv_lines),
+      f"lines={_dv_lines}")
+check("divergence: healthy line carries no tag (2026-11-07)",
+      any("Healthy Player:" in ln and "[!" not in ln
+          for ln in _dv_lines),
+      f"lines={_dv_lines}")
 check("divergence: healthy player flagged with ECR-HIGHER label",
       any("Healthy Player" in ln and "ECR HIGHER" in ln
           for ln in _dv_lines),
