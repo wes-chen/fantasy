@@ -703,7 +703,9 @@ def value_divergences(bypos, fp, fval, players, eff_slots):
     artifact, not a signal — the same veto G1 applies (#28, ADV-FF-19).
     The 2026-10-21 case: Davante Adams (ruptured hamstring, Sleeper Out)
     flagged CALC HIGHER on a pre-injury FantasyCalc number. Questionable
-    stays flaggable (same as the waiver injury veto)."""
+    stays flaggable (same as the waiver injury veto), and flagged lines
+    carry the [!STATUS] tag (2026-11-07 mirror — the veto already
+    excludes the rest, so a tag here is Questionable)."""
     divs = []
     excluded = 0
     for p in eff_slots:
@@ -723,9 +725,14 @@ def value_divergences(bypos, fp, fval, players, eff_slots):
             lbl = ("ECR HIGHER (calc undervalues: hold / buy-low window)"
                    if d >= 12 else
                    "CALC HIGHER (sell-high candidate)")
+            # 2026-11-07: divergence lines carry the same [!STATUS]
+            # tag as the radar / roster lines. The veto above already
+            # excludes Out/IR/Doubtful/Suspended, so a tag here can
+            # only be Questionable — but a sell-high line on a player
+            # who may not play reads very differently untagged.
             divs.append((abs(d),
-                         f"  {x['name']}: ECR {ecr} vs FC #{fcovr}"
-                         f" -> {lbl}"))
+                         f"  {x['name']}{injury_tag(inj)}: ECR {ecr} "
+                         f"vs FC #{fcovr} -> {lbl}"))
     lines = [ln for _, ln in sorted(divs, reverse=True)[:10]]
     return lines, excluded
 
@@ -1022,7 +1029,11 @@ def injury_tag(inj):
     the G1 usage-gap radar lines (HOLD/SHOP/TARGET/WIRE): the G1 veto
     already excludes Out/IR/Doubtful/Suspended, so a tag there can
     only be Questionable — but a buy-the-usage line on a player who
-    may not play reads very differently untagged."""
+    may not play reads very differently untagged. Mirrored 2026-11-07
+    onto the G8 clog-audit lines (incl. DROP CANDIDATES) and the
+    value-divergence lines: the last two bare-name surfaces — a
+    Questionable bench player reads as droppable/sellable either way,
+    but the tag names the game-time risk on the line Wesley acts on."""
     return f"[!{inj}]" if inj else ""
 
 
@@ -1662,6 +1673,9 @@ def main():
         print(f"  (unavailable: {str(e)[:100]})")
     print()
     print("=== VALUE DIVERGENCE (FantasyPros ECR rank vs FantasyCalc rank) ===")
+    print("  [!STATUS] = Sleeper injury designation (Questionable is "
+          "playable; Out/IR/Doubtful/Suspended are already excluded "
+          "from this section)")
     if fp:
         _div_lines, _div_excl = value_divergences(
             me["bypos"], fp, fval, players, eff_slots)
@@ -2404,10 +2418,18 @@ def main():
                     ("[ahead-out]" if _r["sid"] in _ahead else "") + \
                     ("[rising]" if _r["sid"] in buy_low_sids else "") + \
                     ("[recent-role]" if _r["sid"] in recent_sids else "")
+            # 2026-11-07: clog lines carry the same [!STATUS] tag as
+            # the roster / radar lines — the ranked dicts already carry
+            # each player's designation in "inj". Tag only, never a
+            # veto or a reselection.
+            _it = injury_tag(_r.get("inj") or "")
             print(f"    {_r['name']} ({_r['pos']},{_r['val']} -> "
-                  f"contingent {_r['contingent']}){_tags}")
+                  f"contingent {_r['contingent']}){_it}{_tags}")
         if _drops:
-            print(f"    DROP CANDIDATES: {', '.join(_drops)}")
+            _drop_txt = ", ".join(
+                f"{_r['name']}{injury_tag(_r.get('inj') or '')}"
+                for _r in _ranked if _r["name"] in _drops)
+            print(f"    DROP CANDIDATES: {_drop_txt}")
     except Exception as e:  # noqa: BLE001
         print(f"    (unavailable: {str(e)[:100]})")
     # --- NF-01: waiver priority cost ---
