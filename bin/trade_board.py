@@ -281,6 +281,39 @@ def claim_is_stale(filed_date, today=None):
     except TypeError:
         return False
 
+def offer_age_days(sent_date, today=None):
+    """Days since an offer was sent (None when the date is unparsable or
+    in the future — fail-open, never a phantom age)."""
+    try:
+        from datetime import date as _date
+        sent = _date.fromisoformat(str(sent_date).strip())
+    except (TypeError, ValueError):
+        return None
+    if today is None:
+        today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    try:
+        age = (today - sent).days
+    except TypeError:
+        return None
+    return age if age >= 0 else None
+
+def offer_is_stale(sent_date, today=None):
+    """True when a pending offer has been open 7+ days. Registry history:
+    offers sent Sep 20-29 resolved within 2 days (rejected Sep 22/24,
+    expired Oct 4 by confirmation) and the Nov 5 Vele feeler was
+    countered the same day; the longest-lived resolved offer, the Oct 28
+    Harrison counter, resolved on day 7 — so 7 is the outer edge of
+    normal. A pending offer at 7+ days has almost certainly been answered
+    in-app (a counter or decline is invisible to the registry) or
+    forgotten, and its ON-BLOCK then blocks trades on a dead offer — the
+    live case: the Nov 5 Jeanty+Vele->Lawrence counter, dead at its
+    5:15pm lock that evening, still blocking Jeanty on Nov 8. Display
+    only: the block stays (same as the claims STALE pattern) — the note
+    tells chat to resolve the row; only chat edits the registry. Fail-open
+    (False) on unparsable or future dates."""
+    _age = offer_age_days(sent_date, today=today)
+    return _age is not None and _age >= 7
+
 def slot_math(roster, rp, reserve_slots):
     """Live active/bench/IR arithmetic (E14). Sleeper double-lists IR
     occupants in `players`, so active = players minus the reserve
@@ -1635,10 +1668,14 @@ def main():
     if onblock:
         print("=== PENDING OFFERS (your open offers — ON-BLOCK: never propose) ===")
         for pid, info in onblock.items():
+            _age = offer_age_days(info["date"])
+            _stale = offer_is_stale(info["date"])
             print(f"  {info['name']}: offered to {info['partner']} "
                   f"on {info['date']}"
                   + (f" [{info['league']}]" if info["league"] else "")
-                  + (f" ({info['notes']})" if info["notes"] else ""))
+                  + (f" ({info['notes']})" if info["notes"] else "")
+                  + (f"  <-- STALE (open {_age}d — verify still open "
+                     "in-app; only chat resolves the row)" if _stale else ""))
         print()
 
     print("=== BYE WEEK AUDIT (FantasyPros) ===")
