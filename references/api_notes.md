@@ -294,6 +294,24 @@ Brown `[!Out]` on the WW clog audit (and on the DROP CANDIDATES line
 flare-up has since ruled him out); the snapusa divergence lines were
 all-healthy today, with 1 injured player excluded by the veto.
 
+### Pending-offer STALE flag (2026-11-08)
+
+The PENDING OFFERS section printed every open offer the same way,
+with no age — a dead offer kept blocking trades silently. Registry
+history: offers resolve in 0-2 days normally (Sep 20-29 rejections
+within 2 days, Nov 5 feeler countered same day); the longest-lived
+resolved offer, the Oct 28 Harrison counter, resolved on day 7. So
+`offer_is_stale()` (with `offer_age_days()`, both fail-open on
+unparsable/future dates) flags an offer open 7+ days, and the render
+appends `<-- STALE (open Nd — verify still open in-app; only chat
+resolves the row)` to its line. Display only — the ON-BLOCK stays,
+same as the pending-claims STALE pattern; only chat edits the
+registry, never auto-clear. Live case: the Nov 5 Jeanty+Vele→Lawrence
+counter died at its 5:15pm lock that evening but was still `pending`
+on Nov 8, keeping Jeanty on-block on the snapusa board; the flag
+would have surfaced it for resolution on day 7 (Nov 12) at the
+latest, and the Tuesday worker now sees the age on every open offer.
+
 ## Sleeper news trigger (zero-auth, for the interrupt-driven news scan)
 
 The players DB carries `news_updated` (ms epoch) per player. Diff the
