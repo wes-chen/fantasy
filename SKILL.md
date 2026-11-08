@@ -157,7 +157,11 @@ mirror of the swap-row tag)).
 A `=== PENDING OFFERS ===` section (ADV-FF-07) prints Wesley's own open
 offers and marks those players `[ON-BLOCK: ...]` in the roster — on-block
 is per-league (gh #26): an open snapusa offer never blocks the same player
-on the weekend-warriors board, and vice versa.
+on the weekend-warriors board, and vice versa. An offer open 7+ days
+renders `STALE (open Nd — verify still open in-app; only chat resolves
+the row)` on its line — the block stays until chat resolves the row, it
+never auto-clears (the Nov 5 Jeanty+Vele→Lawrence counter died at its
+5:15pm lock but kept Jeanty on-block until resolved).
 The header also prints the season clock: current NFL week, weeks to the
 trade deadline, and the posture below. From Week 8, E12 endgame mode gates
 in: snapusa gets a days-to-trade-lock countdown (read off the nflverse
