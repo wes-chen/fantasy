@@ -733,6 +733,38 @@ check("claim_is_stale: garbage date -> fresh, fail-open, no crash",
 check("claim_is_stale: None -> fresh, fail-open, no crash",
       tb.claim_is_stale(None, _stale_today) is False)
 
+# offer_is_stale (2026-11-08): a pending offer open 7+ days has almost
+# certainly been answered in-app (counter/decline invisible to the
+# registry) or forgotten — its ON-BLOCK then blocks trades on a dead
+# offer (the Nov 5 Jeanty+Vele->Lawrence counter, dead at its 5:15pm
+# lock, still blocking Jeanty on Nov 8). Display-only flag; the block
+# stays until chat resolves the row. 7 days, not 8: offers resolve in
+# 0-2 days normally and the longest-lived resolved offer took 7.
+_stale_offer_today = date(2026, 11, 8)
+check("offer_is_stale: 6 days old -> fresh (inside the normal window)",
+      tb.offer_is_stale("2026-11-02", _stale_offer_today) is False)
+check("offer_is_stale: 7 days old -> stale (outer edge of normal)",
+      tb.offer_is_stale("2026-11-01", _stale_offer_today) is True)
+check("offer_is_stale: 15 days old -> stale",
+      tb.offer_is_stale("2026-10-24", _stale_offer_today) is True)
+check("offer_is_stale: sent today -> fresh",
+      tb.offer_is_stale("2026-11-08", _stale_offer_today) is False)
+check("offer_is_stale: future date -> fresh, fail-open",
+      tb.offer_is_stale("2026-11-09", _stale_offer_today) is False)
+check("offer_is_stale: garbage date -> fresh, fail-open, no crash",
+      tb.offer_is_stale("not-a-date", _stale_offer_today) is False)
+check("offer_is_stale: None -> fresh, fail-open, no crash",
+      tb.offer_is_stale(None, _stale_offer_today) is False)
+check("offer_age_days: 3 days old -> 3",
+      tb.offer_age_days("2026-11-05", _stale_offer_today) == 3)
+check("offer_age_days: garbage/future -> None, fail-open",
+      tb.offer_age_days("not-a-date", _stale_offer_today) is None
+      and tb.offer_age_days("2026-11-09", _stale_offer_today) is None)
+check("offer stale: wired into the PENDING OFFERS render "
+      "(def + render call)",
+      _src.count("offer_is_stale(") >= 2,
+      f"count={_src.count('offer_is_stale(')}")
+
 # Sleeper double-lists IR occupants in `players`: active must subtract
 # the reserve overlap (the 9/23 Pacheco case: 17 listed, 1 in reserve,
 # 16 real roster slots).
@@ -2987,12 +3019,77 @@ if _onblock:
     for _pid, _info in _onblock.items():
         check(f"snapusa: {_info['name']} flagged ON-BLOCK (ADV-FF-07)",
               _info["name"] in out and "[ON-BLOCK" in out)
+    # Offer-STALE biconditional (2026-11-08): every pending-offer line
+    # renders STALE iff its sent date is 7+ days old; the block itself
+    # never lifts on age alone. Today the live rows are 3 days old
+    # (Nov 5 counter), so this pins the fresh side; the fixture-swap
+    # block below pins the stale side.
+    _off_sec = out.split("=== PENDING OFFERS")[1].split("===")[1]
+    _off_lines = [ln for ln in _off_sec.splitlines() if ln.startswith("  ")]
+    for _pid, _info in _onblock.items():
+        _oline = next((ln for ln in _off_lines if _info["name"] in ln),
+                      None)
+        _want_stale = tb.offer_is_stale(_info["date"])
+        check(f"snapusa: {_info['name']} offer-STALE biconditional "
+              f"(sent {_info['date']}, stale={_want_stale})",
+              _oline is not None
+              and ("STALE" in _oline) == _want_stale,
+              f"line={_oline}")
 else:
     check("snapusa: registry empty -> no PENDING OFFERS section, "
           "no ON-BLOCK flags (ADV-FF-07)",
           "=== PENDING OFFERS" not in out and "[ON-BLOCK" not in out,
           "empty registry must not block any trades")
 check("snapusa: posture line present", "| posture:" in out)
+
+# ---------------- pending offers: fixture-swap end-to-end ----------------
+# The real pending_offers.md is local-only (never pushed) and its live
+# rows are 3 days old (fresh), so the biconditional above only pins the
+# fresh side. Swap in a synthetic fixture — one stale-dated row, one
+# fresh — run the board, assert STALE renders only on the stale line
+# (with its live-computed age) and the stale row still prints (the
+# block stays; only the flag is new), then restore byte-identical.
+_offers_file = os.path.join(SKILL, "pending_offers.md")
+_offers_orig = (open(_offers_file).read()
+                if os.path.exists(_offers_file) else None)
+try:
+    # Dates are relative to today so the fixture never ages into a
+    # false failure on a later daily run (a fixed 2026-11-07 "fresh"
+    # row would go stale on 2026-11-14).
+    _fx_today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    _fx_stale = (_fx_today - timedelta(days=19)).isoformat()
+    _fx_fresh = (_fx_today - timedelta(days=1)).isoformat()
+    open(_offers_file, "w").write(
+        "# fixture — stale + fresh rows, restored after the run\n\n"
+        f"99991 | Stale Offer Test | mate | {_fx_stale} | pending | snapusa | fixture stale\n"
+        f"99992 | Fresh Offer Test | mate | {_fx_fresh} | pending | snapusa | fixture fresh\n")
+    _off_out = run_board(SNAPUSA).stdout
+    check("pending offers fixture: PENDING OFFERS section renders",
+          "=== PENDING OFFERS (your open offers" in _off_out)
+    _off_fsec = _off_out.split("=== PENDING OFFERS")[1].split("===")[1]
+    _sline = next((ln for ln in _off_fsec.splitlines()
+                   if "Stale Offer Test" in ln), None)
+    _fline = next((ln for ln in _off_fsec.splitlines()
+                   if "Fresh Offer Test" in ln), None)
+    _exp_age = tb.offer_age_days(_fx_stale)
+    check("pending offers fixture: stale row renders STALE with its age",
+          _sline is not None and "STALE" in _sline
+          and _exp_age is not None
+          and f"open {_exp_age}d" in _sline,
+          f"line={_sline}")
+    check("pending offers fixture: fresh row renders no STALE",
+          _fline is not None and "STALE" not in _fline,
+          f"line={_fline}")
+    check("pending offers fixture: stale row still listed (block stays)",
+          _sline is not None
+          and f"offered to mate on {_fx_stale}" in _sline)
+finally:
+    if _offers_orig is None:
+        os.unlink(_offers_file)
+    else:
+        open(_offers_file, "w").write(_offers_orig)
+check("pending offers fixture: registry restored byte-identical",
+      open(_offers_file).read() == _offers_orig)
 
 # ---------------- pending claims: fixture-swap end-to-end ----------------
 # The real pending_claims.md is local-only (never pushed) and currently empty
