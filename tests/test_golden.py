@@ -3128,10 +3128,21 @@ try:
     if _adds and _adds[0] in _name2pid:
         _target_name, _target_pid = _adds[0], _name2pid[_adds[0]]
         _target_assert_add = True
-    else:
-        _m = re.search(r"^  top FA \w+: ([^(]+)\(", _pass1, re.M)
-        if _m and _m.group(1) in _name2pid:
-            _target_name, _target_pid = _m.group(1), _name2pid[_m.group(1)]
+    # Tag target: first resolvable name on a top-FA line — on an FA line by
+    # construction. The ADD target cannot serve this: a K/DEF bye-replacement
+    # ADD (2026-11-10: Eddy Pineiro) is suppressed when claim-pending and
+    # may sit outside the top-4 FA lines, so no [CLAIM-PENDING] can ever
+    # render for it — the old single-target check failed on that, not on
+    # engine behavior (the suppression + skip note were correct).
+    _tag_name, _tag_pid = None, None
+    for _fa_line in re.findall(r"^  top FA \w+: (.+)$", _pass1, re.M):
+        for _entry in _fa_line.split(", "):
+            _nm = _entry.split("(")[0].strip()
+            if _nm in _name2pid:
+                _tag_name, _tag_pid = _nm, _name2pid[_nm]
+                break
+        if _tag_pid:
+            break
     # ETA-asserted rows carry a fresh filed date (2 days ago); a claim
     # filed 2026-10-17 renders STALE by now (2026-11-01), not an ETA —
     # that is the stale-row case, asserted separately below.
@@ -3142,6 +3153,8 @@ try:
         fh.write(f"{_theirs_pid} | Theirs Player | WR | 2026-10-17 | pending | snapusa | test\n")
         if _target_pid:
             fh.write(f"{_target_pid} | {_target_name} | FA | {_fresh} | pending | snapusa | test\n")
+        if _tag_pid and _tag_pid != _target_pid:
+            fh.write(f"{_tag_pid} | {_tag_name} | FA | {_fresh} | pending | snapusa | test\n")
         fh.write("77777777 | Stale Claim | WR | 2026-10-17 | pending | snapusa | test\n")
         fh.write(f"88888888 | WW Only | RB | {_fresh} | pending | ww | test\n")
     _out = run_board(SNAPUSA).stdout
@@ -3161,9 +3174,11 @@ try:
     check("pending claims: claim lost to another roster -> FAILED",
           f"Theirs Player (WR): claim FAILED — now on {_theirs_disp}'s "
           f"roster [snapusa]" in _out)
-    if _target_pid:
+    if _tag_pid:
         check("pending claims: claimed player tagged on FA lines",
-              "[CLAIM-PENDING]" in _out)
+              re.search(re.escape(_tag_name) + r".*\[CLAIM-PENDING\]",
+                        _out) is not None, _out)
+    if _target_pid:
         check("pending claims: PENDING CLAIMS lists the claim target",
               f"{_target_name} (FA): filed {_fresh} — expected " in _out)
     if _target_assert_add:
