@@ -1296,6 +1296,10 @@ def ir_stash_candidates(players, fval, rostered,
         p = (players or {}).get(sid) or {}
         if p.get("position") not in IR_STASH_POSITIONS:
             continue
+        if not p.get("team"):
+            continue  # no NFL team — no return to stash for (same
+            # 2026-11-10 Koo lesson as the waiver pool: a teamless
+            # player cannot score, so there is no stash case)
         flag = p.get("injury_status") or ""
         if flag not in flags:
             continue
