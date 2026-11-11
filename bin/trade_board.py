@@ -2096,6 +2096,13 @@ def main():
         pos = p.get("position")
         if pos not in WPOS or not p.get("active"):
             continue
+        if not p.get("team"):
+            continue  # no NFL team (2026-11-10: Younghoe Koo, cut
+            # 2026-06-03, still `active` with team=None — and the Nov 10
+            # board recommended him as a K add). A teamless player cannot
+            # score, so he is never a waiver add, a top-FA line, or a
+            # K/DEF bye replacement. Every waiver surface below draws
+            # from this pool, so the one filter covers them all.
         if str(pid) in rostered:
             continue
         pid_s = str(pid)
