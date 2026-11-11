@@ -95,7 +95,12 @@ gated on an open IR slot; the deliberate exception to the injury veto —
 added precisely because they're injured, to stash in IR; 14-team only,
 suppressed in the 4-team league and after the trade deadline; cratering-trend stashes (30-day trend <= -50% of value) render watchlist-only with the trend shown, and surging stashes rank ahead of flat ahead of cratering; layer 10 states the trend discipline and the multi-step sequence for a stash that needs a freed IR slot), and a waiver-wire section (top
 free agents by position on FantasyCalc redraft value — K/DEF carry no FC
-value, so the top FA K/DEF lines print their FantasyPros ROS rank instead
+value, so the top FA K/DEF lines print their FantasyPros ROS rank instead;
+players with no NFL team in Sleeper (team None — Younghoe Koo, cut
+2026-06-03, still `active`) never appear on any waiver surface: no team
+means no fantasy points, so they are excluded from the top-FA lines, the
+suggested ADDs, and the IR stash hunt — the Nov 10 board recommended Koo
+as a K add before this filter)
 and the suggestion engine streams only decisive upgrades: a top-12 ROS
 unit 8+ ranks better than his current one, or a forced replacement when
 his unit is hurt (#20) or on bye this week (#30 — a bye-week unit scores
