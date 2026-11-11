@@ -185,6 +185,23 @@ week, any rank (`kdef_bye_replacement()`). No fall-through to the
 upgrade gate: a bye-week FA scores zero too. When every healthy FA is
 also on bye, no swap is named — the tag still warns.
 
+### Teamless players never surface on waiver lines (2026-11-11)
+
+Sleeper keeps cut players `active: true` with `team: null` (verified
+2026-11-11: Younghoe Koo, cut by the Jets 2026-06-03, still active and
+teamless — and the Nov 10 board recommended him as a K add; he sat #2
+on the top-FA K line as "(unpriced)" on Nov 11). The old FA-pool filter
+checked `active` only, so teamless players flowed into the top-FA lines,
+the K/DEF bye replacement, and the upgrade/suggestion gates. A player
+with no NFL team cannot score fantasy points, so the pool build now
+also requires a truthy `team` (DEFs carry their team abbrev, so the
+filter does not touch them), and `ir_stash_candidates()` applies the
+same guard — a teamless IR/Out player has no return to stash for. The
+golden suite pins the invariant live (no teamless name on any top-FA
+line or suggested ADD, either league) plus a unit check on the stash
+filter. Note the trending-velocity line is a raw Sleeper-adds signal,
+not a recommendation surface, and is not filtered.
+
 ### Suggested-move bye-week tag (2026-10-26)
 
 The mirror case #30 left open: the RECOMMENDED player on bye, not his
