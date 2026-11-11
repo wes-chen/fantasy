@@ -522,6 +522,8 @@ _E15_PLAYERS = {
           "injury_status": "Doubtful"},
     "7": {"full_name": "Kicker Hurt", "position": "K", "team": "TB",
           "injury_status": "IR"},
+    "8": {"full_name": "Cut Hurt", "position": "RB", "team": None,
+          "injury_status": "IR"},
 }
 _E15_FVAL = {
     "1": (500, 40, 120, 30, False),
@@ -531,6 +533,7 @@ _E15_FVAL = {
     "5": (2000, 5, 5, 0, False),
     "6": (600, 30, 90, 0, False),
     "7": (300, 1, 250, 0, False),
+    "8": (800, 20, 50, 0, False),
 }
 _E15_GOT = fi.ir_stash_candidates(_E15_PLAYERS, _E15_FVAL, {"3"})
 check("E15: IR/Out free agents above the bar surface, value-sorted",
@@ -552,6 +555,9 @@ check("E15: Doubtful excluded (IR/Out only — no invented return)",
       not any(c["sid"] == "6" for c in _E15_GOT))
 check("E15: K/DEF excluded (no FC value, not stash targets)",
       not any(c["sid"] == "7" for c in _E15_GOT))
+check("E15: teamless IR player excluded (no NFL team — no return to "
+      "stash; 2026-11-10 Koo lesson)",
+      not any(c["sid"] == "8" for c in _E15_GOT))
 check("E15: mode 4-team -> suppress (wire is an ocean)",
       fi.ir_stash_mode(4, 6, 11, 1, 1) == "suppress")
 check("E15: mode post-deadline -> suppress (waivers-only mode)",
@@ -2238,6 +2244,34 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         check(f"{tag}: #20 top FA {_pos20} shows FP-ROS rank or unpriced",
               bool(re.search(r"\(FP-ROS #\d+\)|\(unpriced\)", _tl20)),
               f"line: {_tl20[:100]}")
+    # Teamless players (2026-11-10 Koo lesson): no NFL team means no
+    # fantasy points, so such a player must never appear on a waiver
+    # surface — top-FA lines or suggested ADDs. Pinned as the general
+    # invariant (display name -> Sleeper team), not just Koo: if he
+    # signs, he legitimately becomes an add again. The IR stash hunt
+    # is covered by the E15 unit check above, not the live board.
+    _pl_tl = json.load(open(os.path.expanduser(
+        "~/workspace/sleeper/players.json")))
+    _name2team_tl = {}
+    for _pid_tl, _p_tl in _pl_tl.items():
+        if not isinstance(_p_tl, dict):
+            continue
+        _nm_tl = fi.def_display_name(str(_pid_tl), _pl_tl)
+        if _nm_tl:
+            _name2team_tl[_nm_tl] = _p_tl.get("team")
+    _tl_bad = []
+    for _ln_tl in out.splitlines():
+        if _ln_tl.startswith("  top FA ") and ": " in _ln_tl:
+            for _e_tl in _ln_tl.split(": ", 1)[1].split(", "):
+                _nm = _e_tl.split("(")[0].strip()
+                if _nm in _name2team_tl and not _name2team_tl[_nm]:
+                    _tl_bad.append(f"top-FA {_nm} has no NFL team")
+    for _ln_tl in _suggested_moves_of(out):
+        _nm = _ln_tl.split("  ADD ", 1)[1].split(" (")[0].strip()
+        if _nm in _name2team_tl and not _name2team_tl[_nm]:
+            _tl_bad.append(f"suggested ADD {_nm} has no NFL team")
+    check(f"{tag}: no teamless player on waiver surfaces (Koo lesson)",
+          not _tl_bad, "; ".join(_tl_bad))
     # #29: YOUR ROSTER prints K and DEF lines (a rostered DEF must never
     # read as missing), and a DEF never renders as a bare "SF"-style
     # abbrev — that readout surfaced as "DEF: empty" in chat 2026-10-06.
@@ -3184,10 +3218,16 @@ try:
     if _target_assert_add:
         _sugg2 = re.search(r"  suggested moves:\n((?:  .*\n)+)", _out)
         _sugg2_lines = _sugg2.group(1) if _sugg2 else ""
+        # The skip-note count is live-state-dependent, not 1 by
+        # construction: the fixture registers TWO skippable claims
+        # (the ADD target + the top-FA tag target), and both count when
+        # each is the top FA at its position (2026-11-11: Pineiro via
+        # the K bye branch + Wentz via the QB branch -> "(2 ...)").
+        # The pin asserts suppression + the note, never the count.
         check("pending claims: claimed ADD is suppressed, never re-recommended",
               f"  ADD {_target_name} (" not in _sugg2_lines
-              and "(1 claim-pending player(s) skipped: already claimed)"
-              in _out,
+              and re.search(r"\(\d+ claim-pending player\(s\) skipped: "
+                            r"already claimed\)", _out) is not None,
               "the Oct 13-16 Chase re-recommendation must not recur")
     _out_ww = run_board(WW).stdout
     check("pending claims: ww run sees only the ww row (per-league scoping)",
