@@ -2089,6 +2089,44 @@ def main():
     else:
         print("  deep league: wire is thin — only startable FAs at thin "
               "positions matter; never drop a startable asset")
+    # ADV-FF-18: every suggested ADD is labeled FA NOW (instant add, no
+    # priority cost) or CLAIM (waiver-locked: burns his slot — clears
+    # ~waiver_clear_days after a recent drop, else at the per-league
+    # weekly run) from the recent-drop timestamps — Wesley's 9/23
+    # "FA or claim?" ask. ADV-FF-20: the run time is the observed
+    # per-league run (WAIVER_RUN_LABEL), not the stale Sleeper field.
+    # Hoisted above the top-FA loop (2026-11-12, Pineiro lesson): the
+    # top-FA lines need the same path helpers — a recently-dropped
+    # player on the top-FA list is waiver-locked, not an instant add,
+    # and the Nov 10 board printed Pineiro as a plain FA.
+    _clear_days = (league.get("settings") or {}).get("waiver_clear_days", 2)
+    _now_ms = int(time.time() * 1000)
+    _clear_lbl = clear_label(league)
+    _waiver_slot = waiver_slot(rosters, a.me)
+
+    def _path(fapid):
+        return acquisition_path(fapid, recent_drops, _clear_days, _now_ms)
+
+    def _claimtag(fapid):
+        # CLAIM-only tag (top-FA mirror of _pathtag's CLAIM branch):
+        # claim_eta — a recently dropped player clears
+        # ~waiver_clear_days after the drop on his own schedule (the
+        # observed Chase case), not at the weekly run; anything past
+        # the window uses the weekly-run label. Tag only, never a
+        # veto/reselection; FA NOW players stay untagged (the default).
+        # Semicolon, not comma, before "burns": the top-FA lines are
+        # comma-joined and the pins split segments on ", " — a comma
+        # inside the tag would fragment the segment (2026-11-12: the
+        # first run broke the P-tag pin exactly this way).
+        _eta = claim_eta(fapid, recent_drops, _clear_days, _clear_lbl,
+                         _now_ms)
+        return f" [CLAIM — {_eta}; burns #{_waiver_slot}]"
+
+    def _pathtag(path, fapid):
+        if path == "claim":
+            return _claimtag(fapid)
+        return " [FA NOW — instant add, no priority cost]"
+
     fa_by_pos = {}
     for pid, p in players.items():
         if not isinstance(p, dict):
@@ -2124,6 +2162,7 @@ def main():
             return (f"{n}({val}){_btag({'id': pid_s})}"
                     + (f"[!{inj}]" if inj else "")
                     + ("[CLAIM-PENDING]" if pid_s in claims else "")
+                    + (_claimtag(pid_s) if _path(pid_s) == "claim" else "")
                     + ptag_of(pid_s))
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
                         for v, n, inj, pid_s in fa_by_pos[pos][:4])
@@ -2162,30 +2201,8 @@ def main():
     for p in eff_slots:
         bench.extend(me["bypos"].get(p, [])[eff_slots[p]:])
     bench.sort(key=lambda x: x["val"])
-    # ADV-FF-18: every suggested ADD is labeled FA NOW (instant add, no
-    # priority cost) or CLAIM (waiver-locked: burns his slot — clears
-    # ~waiver_clear_days after a recent drop, else at the per-league
-    # weekly run) from the recent-drop timestamps — Wesley's 9/23
-    # "FA or claim?" ask. ADV-FF-20: the run time is the observed
-    # per-league run (WAIVER_RUN_LABEL), not the stale Sleeper field.
-    _clear_days = (league.get("settings") or {}).get("waiver_clear_days", 2)
-    _now_ms = int(time.time() * 1000)
-    _clear_lbl = clear_label(league)
-    _waiver_slot = waiver_slot(rosters, a.me)
-
-    def _path(fapid):
-        return acquisition_path(fapid, recent_drops, _clear_days, _now_ms)
-
-    def _pathtag(path, fapid):
-        if path == "claim":
-            # claim_eta: a recently dropped player clears ~waiver_clear_days
-            # after the drop on his own schedule (the observed Chase case),
-            # not at the weekly run; anything past the window uses the
-            # weekly-run label.
-            _eta = claim_eta(fapid, recent_drops, _clear_days, _clear_lbl,
-                             _now_ms)
-            return f" [CLAIM — {_eta}, burns #{_waiver_slot}]"
-        return " [FA NOW — instant add, no priority cost]"
+    # (ADV-FF-18 helpers _path/_pathtag/_claimtag are defined above the
+    # top-FA loop — the top-FA lines share them.)
 
     # Pending waiver claims (chat-driven pending_claims.md — pending claims
     # are invisible to the Sleeper API, so without this the board
