@@ -202,6 +202,31 @@ line or suggested ADD, either league) plus a unit check on the stash
 filter. Note the trending-velocity line is a raw Sleeper-adds signal,
 not a recommendation surface, and is not filtered.
 
+### Top-FA CLAIM tag (2026-11-12)
+
+The mirror case ADV-FF-18 left open: the suggested-move lines already
+carried `[CLAIM — clears ..., burns #N]` for waiver-locked players, but
+the top-FA lines — the first surface a reader scans — printed them as
+plain free agents. Live case Nov 10: Eddy Pineiro, dropped Mon 23:34
+PT and locked until Wed 11:34pm PT, sat on the top-FA K line with no
+indication, and chat called him "still free league-wide" (the Sleeper
+rosters API shows unrostered, not waiver status). The `_path` /
+`_pathtag` helpers are now hoisted above the top-FA loop, and a single
+`_claimtag()` helper renders the CLAIM text for both surfaces, so the
+ETA can never drift between them; the top-FA formatter appends it
+when `acquisition_path()` says claim, and FA NOW players stay untagged
+(the default). Tag only, never a veto or a reselection. The tag reads
+`[CLAIM — <eta>; burns #N]` — semicolon, not comma, before "burns":
+the top-FA lines are comma-joined and the golden pins split segments
+on ", ", so a comma inside the tag fragments the segment (the first
+run broke the P-tag pin exactly this way). Live cases
+2026-11-12: snapusa McGowan / Harrison Jr. / Worthy / Brian Thomas
+Jr. / Smack, WW Jeanty / Likely. The golden suite pins the
+biconditional live per league (tag iff the recent-drop recompute says
+claim) plus a source-count pin on the shared helper. Note the
+trending-velocity line stays untagged — same reasoning as the teamless
+note above, it is a signal line, not a recommendation surface.
+
 ### Suggested-move bye-week tag (2026-10-26)
 
 The mirror case #30 left open: the RECOMMENDED player on bye, not his
