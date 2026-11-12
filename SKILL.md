@@ -110,6 +110,10 @@ week); and the mirror case — a suggested ADD who is himself on bye this
 week carries [ON BYE W.. — scores zero this week] on the move line, so a
 Monday claim for a player who can't start Sunday says so (tag only, never
 a veto: the player can still be the right claim for rest-of-season value),
+and a top-FA player dropped within the waiver window carries the same
+`[CLAIM — clears ..., burns #N]` tag as a suggested move (2026-11-12
+Pineiro lesson — the Nov 10 board listed him as a plain FA while he was
+locked until Wed 11:34pm PT; FA NOW players stay untagged),
 and the G5 playoff-schedule tag on the same lines — every top-FA line
 and every suggested ADD carries `[P+ soft]`/`[P- brutal]`/`[PLAYOFF BYE
 W..]` from Week 5, so a Monday claim sees the W15-17 lens without a
