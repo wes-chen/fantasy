@@ -718,6 +718,16 @@ check("claim_eta: corrupt drop timestamp -> weekly-run label, no crash",
       tb.claim_eta("p1", {"p1": "not-a-time"}, 2, "WEEKLY", _NOW)
       == "WEEKLY")
 
+# Top-FA CLAIM tag (2026-11-12, Pineiro lesson): the CLAIM text renders
+# from exactly one helper (_claimtag) shared by the suggested-move tag
+# and the top-FA formatter — one rendering, two surfaces, so the ETA
+# can never drift between them. Tag only, never a veto.
+_src = open(os.path.join(SKILL, "bin", "trade_board.py")).read()
+check("top-FA CLAIM tag: single _claimtag helper wired into both "
+      "surfaces (suggested-move tag + top-FA formatter)",
+      _src.count("_claimtag(") >= 3,
+      f"count={_src.count('_claimtag(')}")
+
 # claim_is_stale (2026-11-01): a pending claim still showing FA past one
 # full weekly waiver cycle has necessarily passed a run without clearing,
 # so its 'expected clears' ETA is stale and the row needs resolving.
@@ -2471,6 +2481,78 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
               f"unresolvable)", not _badpt, "; ".join(_badpt))
     except Exception as _ept:  # noqa: BLE001 - guarded live check: SKIP
         print(f"  SKIP waiver P-tag biconditional ({tag}): {_ept}")
+    # Top-FA CLAIM tag (2026-11-12, Pineiro lesson): the suggested moves
+    # already carried [CLAIM — clears ..., burns #N] for waiver-locked
+    # players, but the top-FA lines printed them as plain FAs — the Nov
+    # 10 board listed Pineiro (dropped Mon 23:34 PT, locked til Wed
+    # 11:34pm) with no indication, and chat called him free. Ground
+    # truth is the same Sleeper transactions the board reads (rounds
+    # 1-18, latest complete free_agent/waiver drop per player) run
+    # through tb.acquisition_path; names resolve via def_display_name
+    # (DEFs included — full_name is None for them). Live firing cases
+    # 2026-11-12: snapusa McGowan/Harrison/Worthy/BTJ/Smack and WW
+    # Jeanty/Likely, all tagged; every other top-FA segment untagged.
+    # Guarded: SKIP when the live recompute fails here.
+    try:
+        _lgcl = tb.get(f"https://api.sleeper.app/v1/league/{league}")
+        _cdcl = ((_lgcl.get("settings") or {}).get("waiver_clear_days")
+                 or 2)
+        _rdcl = {}
+        for _rndcl in range(1, 19):
+            _txcl = tb.get(f"https://api.sleeper.app/v1/league/{league}"
+                           f"/transactions/{_rndcl}") or []
+            for _tcl in _txcl:
+                if (_tcl.get("status") == "complete"
+                        and _tcl.get("type") in ("free_agent", "waiver")):
+                    _ccl = _tcl.get("created") or 0
+                    if _ccl:
+                        for _pidcl in (_tcl.get("drops") or {}):
+                            _pidcl = str(_pidcl)
+                            if _ccl > _rdcl.get(_pidcl, 0):
+                                _rdcl[_pidcl] = _ccl
+        _plcl = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _nm2pidcl, _dupcl = {}, set()
+        for _sidcl, _pcl in _plcl.items():
+            if not isinstance(_pcl, dict):
+                continue
+            _nmcl = fi.def_display_name(str(_sidcl), _plcl)
+            if not _nmcl:
+                continue
+            if _nmcl in _nm2pidcl:
+                _dupcl.add(_nmcl)
+            _nm2pidcl[_nmcl] = str(_sidcl)
+        for _dcl in _dupcl:
+            _nm2pidcl.pop(_dcl, None)
+        _nowcl = int(time.time() * 1000)
+        _badcl, _checkedcl, _skippedcl = [], 0, 0
+        for _lncl in out.splitlines():
+            _mtcl = re.match(r"  top FA (QB|RB|WR|TE|K|DEF): (.*)$", _lncl)
+            if not _mtcl:
+                continue
+            for _segcl in _mtcl.group(2).split(", "):
+                if _segcl in ("(none)", ""):
+                    continue
+                _nm = _segcl.split("(")[0].strip()
+                _pidcl = _nm2pidcl.get(_nm)
+                if _pidcl is None:
+                    _skippedcl += 1
+                    continue
+                _checkedcl += 1
+                _want_claim = (tb.acquisition_path(
+                    _pidcl, _rdcl, _cdcl, _nowcl) == "claim")
+                _has_claim = "[CLAIM — " in _segcl
+                if _want_claim != _has_claim:
+                    _badcl.append(f"{_nm} want_claim={_want_claim} "
+                                  f"got={_has_claim}: {_segcl[:120]}")
+                elif _want_claim and "burns #" not in _segcl:
+                    _badcl.append(f"{_nm} CLAIM tag without priority "
+                                  f"cost: {_segcl[:120]}")
+        check(f"{tag}: top-FA CLAIM tag matches the recent-drop "
+              f"recompute ({_checkedcl} checked, {_skippedcl} "
+              f"unresolvable)", not _badcl, "; ".join(_badcl))
+    except Exception as _ecl:  # noqa: BLE001 - guarded live check: SKIP
+        print(f"  SKIP top-FA CLAIM biconditional ({tag}): {_ecl}")
     # swap-row bye-week tag (2026-11-02): the CANDIDATE SWAPS / 2-FOR-1
     # rows print [bye N] for the incoming player, but only the explicit
     # tag says he scores zero THIS week. Biconditional off the row text
