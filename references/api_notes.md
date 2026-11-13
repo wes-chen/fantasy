@@ -386,3 +386,32 @@ add that closes it is tagged `[closes QB coverage gap]` via the same
 `tb.closes_coverage_gap()` predicate as TE. Live in snapusa from the
 Cousins trade on (Dak + Jones only, no QB3); skipped in wire-rich
 (<=6-team) leagues like the rest of the audit.
+
+## Partner-fit mirror on 1-for-1 swaps (2026-11-13)
+
+The old 1-for-1 gate was the coarse `need_score` thinness flag: the
+partner had to be thin (fewer startable players than slots+1) at the
+sent player's position. Thin is not fit, in both directions. The live
+cases from the Nov 10 board: the Olave holder's RB need read 0 (Kaelon Black
+patched their room) yet Derrick Henry would still start for them — the
+engine printed "(no clean 1-for-1 fits)" while the persona overrode it
+with Henry→Olave; and the Nov 13 board's top 12 rows were all Chig
+Okonkwo (133) for 583–1380 players at 77–90% UNFAIR gaps — +986 for
+Wesley, deeply negative for the partner, who would never say yes.
+
+The gate is now the partner's own lineup-points delta: `swap_delta`
+with the roles reversed (partner sends `theirs`, receives `mine`) on
+the same injury-discounted, G5 playoff-weighted basis, against the
+partner's discounted projected lineup (computed once per partner).
+Rows require it > 0 and print it as `[their lineup +N]` right after
+the `[lineup ...]` bracket. Rows failing it are dropped with a count
+note mirroring the lateral-drop note ("sent player couldn't crack
+their projected starting lineup"). The partner's bye-cluster veto is
+NOT applied: the 20% 3-starter penalty is already inside their delta,
+and their bye week is their problem, not a reason to hide the row.
+The 2-for-1 section keeps its own need gate (both pieces must be a
+position they need) — extending the mirror there is a follow-up, not
+this run. Golden tests: synthetic role-reversed `swap_delta` checks
+(deep-but-weak partner still gains; the one-sided trap loses 35) plus
+live pins that every 1-for-1 row carries a positive tag and the
+partner-dropped note matches the mirror format.
