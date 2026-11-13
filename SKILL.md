@@ -77,7 +77,16 @@ was the live case), and exactly who starts and who sits after the deal (the sent
 gone, never listed as sitting; "sits" names only kept players who were
 starting and are now benched); lateral
 swaps where the incoming player can't crack his projected starting
-lineup are dropped outright), a 2-for-1 consolidation section (E3 —
+lineup are dropped outright — and the same test runs in reverse on the
+partner (2026-11-13 partner-fit mirror: the old gate was the coarse
+need_score thinness flag, which blocked deals like Henry→Olave where
+the Olave holder's RB need read 0 yet Henry would still start for them, and
+passed one-sided rows like Okonkwo→Egbuka; now the sent player must
+crack the partner's projected starting lineup — the partner's own
+lineup-points delta on the same discounted basis, printed as
+`[their lineup +N]` on every 1-for-1 row — and rows where it is ≤ 0
+are dropped with a count note; the 2-for-1 section keeps its own
+need gate for now), a 2-for-1 consolidation section (E3 —
 4-team league only: two surplus pieces for one partner elite, ranked by
 lineup-points delta per freed roster slot, which refills from the wire
 in a 4-team league; 14-team boards never show it — depth is currency
