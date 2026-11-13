@@ -1825,6 +1825,41 @@ _old27 = [x["name"] for x in _E2MY
 check("#27 negative control: the pre-fix one-liner listed the sent "
       "starter under sits",
       _old27 == ["My RB1"], f"old sits={_old27}")
+# --- partner-fit mirror (2026-11-13): the 1-for-1 gate is now the
+# partner's own lineup delta (swap_delta with the roles reversed), not
+# the coarse need_score thinness flag. The Nov 10 live case: the Olave holder's
+# RB need read 0 (Black patched their room) yet Henry would still start
+# for them, while a thin team can still say no to a player who can't
+# crack their lineup. The Okonkwo live case is the mirror trap: sending
+# a 133 TE for a 1380 WR is +986 for Wesley and deeply negative for them.
+# Deep-but-weak partner fixture: 5 RBs (depth, not thin) whose worst
+# starter is 70 — the old need gate would have blocked the 100 RB, the
+# new gate passes it because it cracks the lineup.
+_PDP = {p: [dict(x) for x in lst] for p, lst in _E2P.items()}
+_PDP["RB"].extend([{"id": "r4", "name": "My RB4", "pos": "RB", "val": 65},
+                   {"id": "r5", "name": "My RB5", "pos": "RB", "val": 60}])
+_PDLIN = _E2LIN(_PDP)
+_PDCTX = dict(me_bypos=_PDP, dval_for=lambda x: x["val"],
+              lineup_ids_fn=_E2LIN,
+              my_lineup_dval=sum(x["val"] for x in _PDLIN),
+              my_lineup=_PDLIN,
+              my_lineup_ids={x["id"] for x in _PDLIN}, fp={})
+_d_pd, _, _, _v_pd = tb.swap_delta(
+    _MINE3, {"id": "x5", "name": "Stud RB", "pos": "RB", "val": 100},
+    **_PDCTX)
+check("partner-fit: deep partner (5 RBs, worst starter 70) still gains "
+      "+30 from a 100 RB — thinness is not fit",
+      _d_pd == 30 and _v_pd is False, f"delta={_d_pd}")
+_d_pt, _, _, _ = tb.swap_delta(
+    {"id": "w1", "name": "My WR1", "pos": "WR", "val": 95},
+    {"id": "t9", "name": "Cheap TE", "pos": "TE", "val": 60},
+    **_E2CTX)
+check("partner-fit: sending a 95 starter for a 60 TE loses 35 for them "
+      "— the one-sided Okonkwo trap, gate drops it",
+      _d_pt == -35, f"delta={_d_pt}")
+check("partner-fit: lateral send (70 for 70) gains nothing for them — "
+      "gate drops it",
+      _d_lat <= 0, f"delta={_d_lat}")
 # --- #28: G1 injury veto — dead players never surface as usage-gap bait ---
 _INJ28 = {"nkey_ir": "IR", "nkey_out": "Out", "nkey_d": "Doubtful",
           "nkey_s": "Suspended", "nkey_q": "Questionable",
@@ -3101,6 +3136,34 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           f"rangeless rows: {[ln for ln in _swaps if ln not in _ranged]}")
     check(f"{tag}: value-range legend under swaps header (E7)",
           "value ranges: (point, lo-hi) from 30-day trend volatility" in out)
+    check(f"{tag}: swaps header states the partner-fit rule",
+          "sent player must crack theirs" in out)
+    # Partner-fit mirror (2026-11-13): every 1-for-1 row prints the
+    # partner's own lineup gain, and the gate requires it positive — a
+    # row the partner would never accept can't print with a bare
+    # one-sided delta. Scoped to the CANDIDATE SWAPS section: the 2-for-1
+    # rows also start with "  you send " but carry no partner tag (that
+    # section keeps its own need gate — follow-up, not this run).
+    # Vacuous when a league legitimately has no fits this run (both
+    # leagues today); the synthetic partner-fit checks above carry the
+    # gate itself, this pins the render path.
+    _swsec = out.split(
+        "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")[1].split(
+            "===")[0]
+    _swaps1 = [ln for ln in _swsec.splitlines()
+               if ln.startswith("  you send ")]
+    _ptagged = [ln for ln in _swaps1
+                if re.search(r"\[their lineup \+\d+\]", ln)]
+    check(f"{tag}: every 1-for-1 swap row carries a positive "
+          f"[their lineup +N] tag",
+          not _swaps1 or len(_ptagged) == len(_swaps1),
+          f"untagged rows: {[ln for ln in _swaps1 if ln not in _ptagged]}")
+    _pnote = [ln for ln in out.splitlines()
+              if re.search(r"\(\d+ swap\(s\) dropped: sent player couldn't "
+                          r"crack their projected starting lineup\)", ln)]
+    check(f"{tag}: partner-dropped note, when present, matches the mirror "
+          f"of the lateral-drop note",
+          len(_pnote) <= 1, f"notes: {_pnote}")
 
 
     # E8: the UNPROTECTED flag must fire exactly when a backup is free —
