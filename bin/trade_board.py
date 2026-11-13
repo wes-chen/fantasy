@@ -1507,7 +1507,7 @@ def main():
             ((players.get(str(x["id"]), {}) or {}).get("injury_status")
              or ""))
 
-    def show_swap(mine, mflag, theirs, tflag, partner, hole=False):
+    def show_swap(mine, mflag, theirs, tflag, partner, hole=False, pdelta=None):
         # #19: fairness gap on RAW market values (same basis as the
         # 2-for-1 section) — the bands are one calibrated language.
         gap = fairness_gap(mine["val"], theirs["val"])
@@ -1534,7 +1534,8 @@ def main():
         return (delta, f"  you send {mine['name']} ({mine['val']}, {mlo}-{mhi}){_btag(mine)}{_vtag(mine)}{_itag(mine)}"
                        f" -> {partner}; "
                        f"you get {theirs['name']} ({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_itag(theirs)}{_obt} "
-                       f"[lineup {delta:+.0f}{fit}][gap {gap:.0%}|"
+                       f"[lineup {delta:+.0f}{fit}]"
+                       f"{f'[their lineup {pdelta:+.0f}]' if pdelta is not None else ''}[gap {gap:.0%}|"
                        f"{fairness_band(gap)}]{thin}{tag}{lsig}")
 
     print("=== TEAM NEEDS (startable vs effective slots) ===")
@@ -1815,7 +1816,9 @@ def main():
     else:
         print("  ranked by projected lineup-points delta for you; value gap shown "
               "for fairness (bands: <10% EXCELLENT, 10-20% FAIR, 20-35% STRETCH, "
-              ">35% UNFAIR); incoming must crack your projected starting lineup")
+              ">35% UNFAIR); incoming must crack your projected starting lineup; "
+              "sent player must crack theirs — [their lineup +N] is their "
+              "lineup-points gain on the same discounted basis")
         print("  value ranges: (point, lo-hi) from 30-day trend volatility "
               "(+/- half the 30d drift); [LOW-SIGNAL LATERAL] = both 30-day "
               "trends flat (FC displayTrend) with a small lineup delta")
@@ -1865,17 +1868,44 @@ def main():
                               my_lineup_ids=_my_lineup_d_ids, fp=fp)
         rows = []
         dropped = 0
+        p_dropped = 0
         bye_dropped = 0
         for rid, st in teams.items():
             if rid == my_rid:
                 continue
-            t_need = need_score(st)
+            # Partner-fit mirror (2026-11-13, the Nov 10 fit-asymmetry gap):
+            # the old gate was the coarse need_score — partner thin at the
+            # sent player's position. Thin is not fit: the Olave holder's RB need
+            # read 0 (Black patched their room) yet Henry would still start
+            # for them, while a thin team can still say no to a player who
+            # can't crack their lineup. The gate is now the partner's own
+            # lineup-points delta — swap_delta with the roles reversed
+            # (they send theirs, receive mine) on the same discounted
+            # basis — and every row prints it. Their bye-cluster veto is
+            # NOT applied partner-side: the 20% 3-starter penalty is
+            # already inside the delta, and their bye week is their
+            # problem, not a reason to hide the row.
+            _p_lineup = disc_lineup(st["bypos"])
+            _p_dval = sum(x["val"] for x in _p_lineup)
+            _p_ids = {x["id"] for x in _p_lineup}
+
+            def _pd(theirs, mine):
+                return swap_delta(theirs, mine, me_bypos=st["bypos"],
+                                  dval_for=dval_for, lineup_ids_fn=lineup_ids,
+                                  my_lineup_dval=_p_dval, my_lineup=_p_lineup,
+                                  my_lineup_ids=_p_ids, fp=fp)
+
             for mine, mflag in my_tradable:
-                if t_need.get(mine["pos"], 0) <= 0:
-                    continue  # they don't need it
                 for theirs, tflag in tradable(st):
                     if my_need.get(theirs["pos"], 0) <= 0:
                         continue  # you don't need it
+                    pdelta, _, _, _ = _pd(theirs, mine)
+                    if pdelta <= 0:
+                        # P5 fit veto, partner side: the sent player can't
+                        # crack their projected starting lineup, so the
+                        # deal improves only your side — they say no.
+                        p_dropped += 1
+                        continue
                     delta, _, _, bye_veto = sd(mine, theirs)
                     if bye_veto:
                         # ADV-FF-15: incoming would push a bye week to 4+
@@ -1887,7 +1917,8 @@ def main():
                         # lineup, so equal calc value buys zero lineup gain.
                         dropped += 1
                         continue
-                    rows.append(show_swap(mine, mflag, theirs, tflag, st["name"]))
+                    rows.append(show_swap(mine, mflag, theirs, tflag,
+                                          st["name"], pdelta=pdelta))
         for _, line in sorted(rows, reverse=True)[:12]:
             print(line)
         if not rows:
@@ -1895,6 +1926,9 @@ def main():
         if dropped:
             print(f"  ({dropped} lateral swap(s) dropped: incoming player "
                   f"couldn't crack your projected starting lineup)")
+        if p_dropped:
+            print(f"  ({p_dropped} swap(s) dropped: sent player couldn't "
+                  f"crack their projected starting lineup)")
         if bye_dropped:
             print(f"  ({bye_dropped} swap(s) vetoed: incoming player would push "
                   f"a bye week to 4+ projected starters)")
