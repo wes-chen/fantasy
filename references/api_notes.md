@@ -409,9 +409,36 @@ note mirroring the lateral-drop note ("sent player couldn't crack
 their projected starting lineup"). The partner's bye-cluster veto is
 NOT applied: the 20% 3-starter penalty is already inside their delta,
 and their bye week is their problem, not a reason to hide the row.
-The 2-for-1 section keeps its own need gate (both pieces must be a
-position they need) — extending the mirror there is a follow-up, not
-this run. Golden tests: synthetic role-reversed `swap_delta` checks
+Golden tests: synthetic role-reversed `swap_delta` checks
 (deep-but-weak partner still gains; the one-sided trap loses 35) plus
 live pins that every 1-for-1 row carries a positive tag and the
 partner-dropped note matches the mirror format.
+
+## Partner-fit mirror, 2-for-1 extension (2026-11-14)
+
+The 2-for-1 section kept the coarse `need_score` gate (both pieces
+must be a position they need) after the 1-for-1 mirror landed — and
+the Nov 13 WW board showed why that was the next trap: all five rows
+sent Puka Nacua [!IR] (out to Week 15, value stale) for Gibbs, Allen,
+Bowers, or McCaffrey — +4071 at best for Wesley, deeply negative for
+the partner, who loses an elite for a player scoring zero until Week 15.
+
+The gate is now `swap_delta_2for1_partner` (module-level, next to
+`swap_delta`): the partner sends the elite and receives both pieces,
+on the same injury-discounted, G5 playoff-weighted basis, against the
+partner's discounted projected lineup (computed once per partner). A
+discounted piece counts at its discounted value for them too, so an
+IR headliner can't carry a package. Rows require it > 0 and print it
+as `[their lineup +N]` right after the `[lineup ...]` bracket; rows
+failing it drop with a count note mirroring the 1-for-1 one
+("package couldn't crack their projected starting lineup"). Same
+bye rule as the 1-for-1 mirror: the 20% 3-starter penalty applies
+per incoming piece inside their delta, never a veto. Live after the
+change: all five Puka rows dropped (23 partner-dropped total) and the
+section tops out at honest two-sided rows (Golden+Hubbard→McCaffrey,
++1792 for Wesley, +763 for them). Golden tests: synthetic
+`swap_delta_2for1_partner` checks (two cracking pieces gain +25;
+weak pieces lose 50; lateral package gains 0; IR-discounted headliner
+loses 15; bye-cluster penalty 25 − 22 = 3, never a veto) plus live
+pins that every 2-for-1 row carries a positive tag, the header states
+the rule, and the partner-dropped note matches the mirror format.
