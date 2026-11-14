@@ -1860,6 +1860,69 @@ check("partner-fit: sending a 95 starter for a 60 TE loses 35 for them "
 check("partner-fit: lateral send (70 for 70) gains nothing for them — "
       "gate drops it",
       _d_lat <= 0, f"delta={_d_lat}")
+# --- partner-fit mirror, 2-for-1 extension (2026-11-14) ---
+# Same gate, roles reversed on a 2-for-1: the partner sends one elite
+# and receives two pieces. The Nov 13 live case: all five WW rows sent
+# Puka Nacua [!IR] (out to Week 15, value stale) for Gibbs/Allen/
+# Bowers/McCaffrey — +4071 for Wesley, deeply negative for them.
+# Partner fixture: top-6 lineup 120+100+95+85+80+70 = 550.
+_P2P = {
+    "QB": [{"id": "pq1", "name": "Partner QB", "pos": "QB", "val": 100}],
+    "RB": [{"id": "pe", "name": "Elite RB", "pos": "RB", "val": 120},
+           {"id": "pr2", "name": "Partner RB2", "pos": "RB", "val": 80},
+           {"id": "pr3", "name": "Partner RB3", "pos": "RB", "val": 70}],
+    "WR": [{"id": "pw1", "name": "Partner WR1", "pos": "WR", "val": 95},
+           {"id": "pw2", "name": "Partner WR2", "pos": "WR", "val": 85}],
+    "TE": [{"id": "pt1", "name": "Partner TE1", "pos": "TE", "val": 60}],
+}
+_P2LIN = _E2LIN(_P2P)
+_P2CTX = dict(partner_bypos=_P2P, dval_for=lambda x: x["val"],
+              lineup_ids_fn=_E2LIN,
+              partner_lineup_dval=sum(x["val"] for x in _P2LIN),
+              partner_lineup=_P2LIN,
+              partner_lineup_ids={x["id"] for x in _P2LIN}, fp={})
+_P2A = {"id": "pa", "name": "Piece A", "pos": "RB", "val": 110}
+_P2B = {"id": "pb", "name": "Piece B", "pos": "WR", "val": 105}
+_P2E = {"id": "pe", "name": "Elite RB", "pos": "RB", "val": 120}
+_d2g, _s2g, _st2g, _v2g = tb.swap_delta_2for1_partner(
+    _P2A, _P2B, _P2E, **_P2CTX)
+check("partner-fit 2-for-1: two pieces that both crack their lineup gain "
+      "+25 for them (110+105 replace the 120 elite, RB3 sits)",
+      _d2g == 25 and _st2g == ["Piece A", "Piece B"]
+      and _s2g == ["Partner RB3"] and _v2g is False,
+      f"delta={_d2g} starts={_st2g} sits={_s2g}")
+_d2t, _, _, _ = tb.swap_delta_2for1_partner(
+    {"id": "pa2", "name": "Weak A", "pos": "RB", "val": 70},
+    {"id": "pb2", "name": "Weak B", "pos": "WR", "val": 60},
+    _P2E, **_P2CTX)
+check("partner-fit 2-for-1: two weak pieces for an elite loses 50 for "
+      "them — the one-sided trap, gate drops it",
+      _d2t == -50, f"delta={_d2t}")
+_d2l, _, _, _ = tb.swap_delta_2for1_partner(
+    {"id": "pa3", "name": "Even A", "pos": "RB", "val": 120},
+    {"id": "pb3", "name": "Even B", "pos": "WR", "val": 60},
+    _P2E, **_P2CTX)
+check("partner-fit 2-for-1: lateral package (120+60 for the 120 elite) "
+      "gains nothing — gate drops it",
+      _d2l == 0, f"delta={_d2l}")
+# Puka case: the headliner piece is IR-discounted (0.5x) — the discount
+# applies partner-side too, so a 110 that scores zero until Week 15
+# counts as 55 for them and the package loses.
+_P2IR = dict(_P2CTX,
+             dval_for=lambda x: x["val"] * (0.5 if x["id"] == "pa" else 1.0))
+_d2i, _, _, _ = tb.swap_delta_2for1_partner(_P2A, _P2B, _P2E, **_P2IR)
+check("partner-fit 2-for-1: IR-discounted headliner counts at half value "
+      "for them too — package loses 15, gate drops the Puka rows",
+      _d2i == -15, f"delta={_d2i}")
+# Bye-cluster penalty, partner-side: piece A shares a bye with two of
+# their starters — the 20% penalty lands inside their delta, no veto.
+_P2BYE = dict(_P2CTX, fp={"pa": (7, None, None), "pq1": (7, None, None),
+                          "pw1": (7, None, None)})
+_d2b, _, _, _v2b = tb.swap_delta_2for1_partner(
+    _P2A, _P2B, _P2E, **_P2BYE)
+check("partner-fit 2-for-1: 3-starter bye cluster on an incoming piece "
+      "takes the 20% penalty (25 - 22 = 3), never a veto",
+      _d2b == 3 and _v2b is False, f"delta={_d2b} veto={_v2b}")
 # --- #28: G1 injury veto — dead players never surface as usage-gap bait ---
 _INJ28 = {"nkey_ir": "IR", "nkey_out": "Out", "nkey_d": "Doubtful",
           "nkey_s": "Suspended", "nkey_q": "Questionable",
@@ -3142,11 +3205,10 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     # partner's own lineup gain, and the gate requires it positive — a
     # row the partner would never accept can't print with a bare
     # one-sided delta. Scoped to the CANDIDATE SWAPS section: the 2-for-1
-    # rows also start with "  you send " but carry no partner tag (that
-    # section keeps its own need gate — follow-up, not this run).
-    # Vacuous when a league legitimately has no fits this run (both
-    # leagues today); the synthetic partner-fit checks above carry the
-    # gate itself, this pins the render path.
+    # rows carry the same tag, pinned separately at the E3 checks below
+    # (2026-11-14 extension). Vacuous when a league legitimately has no
+    # fits this run (both leagues today); the synthetic partner-fit
+    # checks above carry the gate itself, this pins the render path.
     _swsec = out.split(
         "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")[1].split(
             "===")[0]
@@ -3634,6 +3696,31 @@ out_snap = run_board(SNAPUSA).stdout
 check("E3: snapusa never prints 2-for-1s (depth is currency there)",
       "=== 2-FOR-1 CONSOLIDATION" not in out_snap,
       "2-for-1 section leaked into the 14-team board")
+# Partner-fit mirror, 2-for-1 extension (2026-11-14): every 2-for-1 row
+# prints the partner's own lineup gain, and the gate requires it
+# positive. Vacuous when WW legitimately has no fits this run; the
+# synthetic swap_delta_2for1_partner checks carry the gate itself.
+_2sec = out_ww.split(
+    "=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")[1].split(
+        "===")[0]
+_2rows = [ln for ln in _2sec.splitlines() if ln.startswith("  you send ")]
+_2tagged = [ln for ln in _2rows
+            if re.search(r"\[their lineup \+\d+\]", ln)]
+check("E3: every 2-for-1 row carries a positive [their lineup +N] tag",
+      not _2rows or len(_2tagged) == len(_2rows),
+      f"untagged rows: {[ln for ln in _2rows if ln not in _2tagged]}")
+check("E3: 2-for-1 header states the partner-fit rule",
+      "sent pieces must crack theirs" in out_ww)
+_p2note = [ln for ln in out_ww.splitlines()
+           if re.search(r"\(\d+ 2-for-1\(s\) dropped: package couldn't "
+                       r"crack their projected starting lineup\)", ln)]
+check("E3: partner-dropped note, when present, matches the mirror of "
+      "the 1-for-1 note",
+      len(_p2note) <= 1, f"notes: {_p2note}")
+check("E3: partner-fit helper is a module function with one board call "
+      "site (definition + call)",
+      _src.count("swap_delta_2for1_partner(") == 2,
+      f"count={_src.count('swap_delta_2for1_partner(')}")
 
 # --- #19: fairness gaps are raw-market-basis in BOTH swap sections -------
 # Each printed row carries its players' raw FantasyCalc values, so the
