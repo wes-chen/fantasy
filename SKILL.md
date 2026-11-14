@@ -85,8 +85,10 @@ passed one-sided rows like Okonkwo→Egbuka; now the sent player must
 crack the partner's projected starting lineup — the partner's own
 lineup-points delta on the same discounted basis, printed as
 `[their lineup +N]` on every 1-for-1 row — and rows where it is ≤ 0
-are dropped with a count note; the 2-for-1 section keeps its own
-need gate for now), a 2-for-1 consolidation section (E3 —
+are dropped with a count note; the 2-for-1 section uses the same mirror
+since 2026-11-14 — the package must gain the partner lineup-points
+after losing the elite, printed as `[their lineup +N]` on every 2-for-1
+row, rows ≤ 0 dropped with a count note), a 2-for-1 consolidation section (E3 —
 4-team league only: two surplus pieces for one partner elite, ranked by
 lineup-points delta per freed roster slot, which refills from the wire
 in a 4-team league; 14-team boards never show it — depth is currency
