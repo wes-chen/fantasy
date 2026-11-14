@@ -813,6 +813,53 @@ def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
               if x["id"] not in my_lineup_ids]
     return delta, sits, starts, bye_veto
 
+
+def swap_delta_2for1_partner(pa, pb, theirs, partner_bypos, dval_for,
+                             lineup_ids_fn, partner_lineup_dval,
+                             partner_lineup, partner_lineup_ids, fp):
+    """Partner-side lineup-points delta of a 2-for-1: they send `theirs`
+    (one elite) and receive `pa` + `pb`.
+
+    The 2026-11-14 extension of the 1-for-1 partner-fit mirror
+    (2026-11-13) to the E3 section: the old gate was the coarse
+    need_score flag (both pieces must be a position they need). Thin is
+    not fit — and a package headlined by an IR player (the Nov 13 WW
+    board's five rows all sent Puka Nacua [!IR] for Gibbs/Allen/Bowers/
+    McCaffrey) reads as a huge gain for Wesley while the partner loses
+    an elite for a player who scores zero until Week 15. The gate is
+    now the partner's own delta on the same injury-discounted, G5
+    playoff-weighted basis, so a discounted piece counts at its
+    discounted value for them too. Returns (delta, sits, starts,
+    bye_veto) like swap_delta; bye_veto is always False partner-side —
+    the 20% 3-starter penalty is applied per incoming piece whose bye
+    clusters with 2+ other starters, and their bye week is their
+    problem, not a reason to hide the row.
+    """
+    gone = {theirs["id"]}
+    new_bypos = {p: [dict(x, val=dval_for(x)) for x in lst
+                     if x["id"] not in gone]
+                 for p, lst in partner_bypos.items()}
+    for piece in (pa, pb):
+        new_bypos.setdefault(piece["pos"], []).append(
+            dict(piece, val=dval_for(piece)))
+    new_lineup = lineup_ids_fn(new_bypos)
+    new_ids = {x["id"] for x in new_lineup}
+    delta = sum(x["val"] for x in new_lineup) - partner_lineup_dval
+    for piece in (pa, pb):
+        tb = fp.get(piece["id"], (None, None, None))[0]
+        if not tb:
+            continue
+        others = sum(1 for x in new_lineup if x["id"] != piece["id"]
+                     and fp.get(x["id"], (None, None, None))[0] == tb)
+        if others >= 2:
+            delta -= 0.20 * dval_for(piece)  # 3+-starter cluster penalty
+    sits = [x["name"] for x in partner_lineup
+            if x["id"] not in new_ids and x["id"] != theirs["id"]]
+    starts = [x["name"] for x in new_lineup
+              if x["id"] not in partner_lineup_ids]
+    return delta, sits, starts, False
+
+
 def playoff_snapshot_lines(league_name, path=None):
     """Printed lines for the G4/G7 board section from the weekly snapshot.
 
@@ -1944,7 +1991,10 @@ def main():
     # core. Ranked by lineup-points delta per freed roster slot (a 2-for-1
     # always frees exactly one, which refills from the wire in a 4-team
     # league), with the value gap vs the combined package shown for
-    # fairness and the same bye-cluster veto as 1-for-1s.
+    # fairness and the same bye-cluster veto as 1-for-1s. The partner
+    # gate is the same fit mirror as 1-for-1s (2026-11-14): the package
+    # must gain the partner lineup-points too — swap_delta_2for1_partner
+    # with the roles reversed — and every row prints their gain.
     if num_teams <= 6 and deadline_passed:
         print("=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
         print("  (trade proposals suppressed — trade deadline "
@@ -1954,7 +2004,8 @@ def main():
         print("=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
         print("  two surplus pieces -> one elite; ranked by lineup-points "
               "delta per freed roster slot (freed slot refills from the "
-              "wire); both pieces must be a position they need")
+              "wire); sent pieces must crack theirs — [their lineup +N] is "
+              "their lineup-points gain on the same discounted basis")
         print("  [PRICE +/-N% vs last board] = FantasyCalc value moved since "
               "the previous board run — the fairness gap on that row may be "
               "stale; re-check before sending")
@@ -1991,7 +2042,7 @@ def main():
                       if x["id"] not in _my_lineup_d_ids]
             return delta, sits, starts, bye_veto
 
-        def show_2for1(a, b, theirs, partner, thins_them):
+        def show_2for1(a, b, theirs, partner, thins_them, pdelta=None):
             # #19: fairness gap on RAW market values — the same basis the
             # 1-for-1 section uses. Injury discounts / G5 playoff weights
             # belong in the lineup delta (swap_delta_2for1, which already
@@ -2013,21 +2064,28 @@ def main():
                     f"{b['name']} ({b['val']}, {blo}-{bhi}){_itag(b)}{_btag(a)}{_vtag(a)}{_btag(b)}{_vtag(b)} -> "
                     f"{partner}; you get {theirs['name']} "
                     f"({theirs['val']}, {tlo}-{thi}){_btag(theirs)}{_vtag(theirs)}{_itag(theirs)}{_obt} "
-                    f"[lineup {delta:+.0f}{fit}][gap vs combined "
+                    f"[lineup {delta:+.0f}{fit}]"
+                    f"{f'[their lineup {pdelta:+.0f}]' if pdelta is not None else ''}[gap vs combined "
                     f"{gap:.0%}|{fairness_band(gap)}][frees 1 slot]{tag}")
 
         package = sorted(my_tradable, key=lambda t: -t[0]["val"])[:12]
-        rows2, bye_dropped2 = [], 0
+        rows2, bye_dropped2, p_dropped2 = [], 0, 0
+        # Partner baselines for the fit mirror, computed once per partner
+        # (same disc_lineup basis as the 1-for-1 section).
+        _p2base = {}
+        for _rid, _st in teams.items():
+            if _rid == my_rid:
+                continue
+            _pl = disc_lineup(_st["bypos"])
+            _p2base[_rid] = (_pl, sum(x["val"] for x in _pl),
+                             {x["id"] for x in _pl})
         for i in range(len(package)):
             for j in range(i + 1, len(package)):
                 (pa, _), (pb, _) = package[i], package[j]
                 for rid, st in teams.items():
                     if rid == my_rid:
                         continue
-                    t_need = need_score(st)
-                    if t_need.get(pa["pos"], 0) <= 0 or \
-                       t_need.get(pb["pos"], 0) <= 0:
-                        continue  # they don't need both pieces
+                    _p2_lineup, _p2_dval, _p2_ids = _p2base[rid]
                     elite = sorted(
                         [x for p in eff_slots for x in st["bypos"].get(p, [])
                          if x["prank"] <= cutoff[p]],
@@ -2038,6 +2096,17 @@ def main():
                         dt = dval_for(theirs)
                         if dt <= 0 or dt < max(da, db) * 1.15:
                             continue  # not a tier-break upgrade
+                        pdelta2, _, _, _ = swap_delta_2for1_partner(
+                            pa, pb, theirs, st["bypos"], dval_for,
+                            lineup_ids, _p2_dval, _p2_lineup, _p2_ids,
+                            fp)
+                        if pdelta2 <= 0:
+                            # Partner-fit mirror: the package can't crack
+                            # their projected starting lineup after losing
+                            # the elite, so the deal improves only your
+                            # side — they say no.
+                            p_dropped2 += 1
+                            continue
                         delta, _, _, veto = swap_delta_2for1(pa, pb, theirs)
                         if veto:
                             bye_dropped2 += 1
@@ -2046,7 +2115,7 @@ def main():
                             continue  # fit veto: no lineup gain
                         rows2.append(show_2for1(
                             pa, pb, theirs, st["name"],
-                            theirs["id"] in thin_ids))
+                            theirs["id"] in thin_ids, pdelta=pdelta2))
         for _, line in sorted(rows2, reverse=True)[:5]:
             print(line)
         if not rows2:
@@ -2055,6 +2124,9 @@ def main():
         if bye_dropped2:
             print(f"  ({bye_dropped2} 2-for-1(s) vetoed: incoming elite "
                   f"would push a bye week to 4+ projected starters)")
+        if p_dropped2:
+            print(f"  ({p_dropped2} 2-for-1(s) dropped: package couldn't "
+                  f"crack their projected starting lineup)")
         print()
     print("=== HOLE-CREATING OPTIONS (persona must price the roster cost) ===")
     for mine, mp in hole_creating(me):
