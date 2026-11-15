@@ -170,7 +170,12 @@ and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, last-game-role players (see
 G1 above), and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
-named as drops; the suggested ADD/DROP pairs draw their DROP from the
+named as drops — with one exception (2026-11-15): a DUPLICATE K/DEF
+behind a healthy, non-bye keeper (best FantasyPros ROS rank at the
+position) is dead weight and IS droppable, in both the audit's DROP
+CANDIDATES and the suggested ADD/DROP pairs; a lone K/DEF is never
+droppable, and when the keeper is hurt or on bye the duplicate is the
+cover, not a drop; the suggested ADD/DROP pairs draw their DROP from the
 same protected pool, so the two sections never disagree on who is
 droppable; clog lines and DROP CANDIDATES carry [!STATUS] (2026-11-07
 mirror of the swap-row tag)).
