@@ -1169,7 +1169,7 @@ def schedule_luck(matchups_by_week, records):
 # ---------------------------------------------------------------- G8 roster-clog audit
 
 def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
-               onblock=None):
+               onblock=None, droppable_unpriced=None):
     """Rank the bench by contingent value (lowest = most droppable).
 
     bench: [{sid, name, pos, val, inj}]. handcuff_of: {sid: True} if the
@@ -1185,6 +1185,12 @@ def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
     droppable. The call site feeds K/DEF as bench because the lineup model
     has no K/DEF slots, so without this guard the only K and DEF on the
     roster always bottom the ranking and get named as drop candidates.
+    droppable_unpriced: set of sids that ARE droppable despite val 0
+    (2026-11-15: duplicate K/DEF units from duplicate_kdef_drops() — a
+    second kicker behind a healthy starter is dead weight, and the
+    waiver suggestion engine draws its DROP from the same pool, so the
+    two sections must agree). A duplicate still needs no contingency
+    boost to qualify (contingent <= val, both 0).
     """
     handcuff_of = handcuff_of or {}
     ahead_out = ahead_out or {}
@@ -1202,9 +1208,13 @@ def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
     # Drops: lowest contingent value AND no contingency boost (no handcuff
     # role, no hurt starter ahead, no rising usage), never on-block/IR,
     # and priced — val > 0 means a value feed exists to judge the cost.
+    # The droppable_unpriced exception is a duplicate K/DEF only: the
+    # call site has already established a healthy, non-bye keeper at the
+    # position, so the duplicate's cost is zero by construction.
+    _dup = {str(x) for x in (droppable_unpriced or set())}
     drops = [d["name"] for d in ranked
              if not d["blocked"] and (d.get("inj") or "") != "IR"
-             and (d.get("val", 0) or 0) > 0
+             and ((d.get("val", 0) or 0) > 0 or d["sid"] in _dup)
              and d["contingent"] <= d.get("val", 0)][:3]
     return ranked, drops
 # ---------------------------------------------------------------- G9 bye-crater forecast
