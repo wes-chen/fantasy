@@ -2151,6 +2151,64 @@ check("G8: unpriced K/DEF sort to the bottom of the ranking",
 check("G8: unpriced players are never named as drop candidates",
       _D8C == ["Clogger"])
 
+# 2026-11-15: duplicate K/DEF — a second kicker (or defense) behind a
+# healthy, non-bye keeper is dead weight and IS droppable, in both
+# surfaces. The Nov 14 ADD Daniels / DROP McLaughlin call had to be
+# hand-derived because the engine could not name the duplicate kicker
+# anywhere: the drop pool is built from the QB/RB/WR/TE bench only, and
+# the clog audit never named an unpriced player as a drop.
+_DUP_FP = {"k1": (7, 8), "k2": (9, 10)}  # (FP-ROS rank, bye week)
+_DUP_PLAYERS = {"k1": {"injury_status": ""},
+                "k2": {"injury_status": ""}}
+_DUP_UNITS = [{"id": "k1", "name": "StarterK", "pos": "K", "val": 0},
+              {"id": "k2", "name": "DupK", "pos": "K", "val": 0}]
+check("dup-K: second kicker droppable behind healthy non-bye keeper",
+      tb.duplicate_kdef_drops(_DUP_UNITS, _DUP_FP, _DUP_PLAYERS,
+                              {"k1": 8, "k2": 10}, 10,
+                              lineup_ids={"k1"}) == ["k2"])
+check("dup-K: single kicker is never a duplicate",
+      tb.duplicate_kdef_drops(_DUP_UNITS[:1], _DUP_FP, _DUP_PLAYERS,
+                              {"k1": 8}, 10, lineup_ids={"k1"}) == [])
+check("dup-K: hurt keeper makes the duplicate the cover, not droppable",
+      tb.duplicate_kdef_drops(
+          _DUP_UNITS, _DUP_FP,
+          {"k1": {"injury_status": "Out"}, "k2": {"injury_status": ""}},
+          {"k1": 8, "k2": 10}, 10, lineup_ids={"k1"}) == [])
+check("dup-K: keeper on bye makes the duplicate the cover",
+      tb.duplicate_kdef_drops(_DUP_UNITS, _DUP_FP, _DUP_PLAYERS,
+                              {"k1": 10, "k2": 10}, 10,
+                              lineup_ids={"k1"}) == [])
+check("dup-K: better-ranked bench unit is the keeper; starter never named",
+      tb.duplicate_kdef_drops(
+          _DUP_UNITS, {"k1": (20, 8), "k2": (7, 12)}, _DUP_PLAYERS,
+          {"k1": 8, "k2": 12}, 10, lineup_ids={"k1"}) == [])
+check("dup-K: missing ranks fall back to list order",
+      tb.duplicate_kdef_drops(_DUP_UNITS, {}, _DUP_PLAYERS,
+                              {"k1": 8, "k2": 10}, 10,
+                              lineup_ids={"k1"}) == ["k2"])
+check("dup-K: duplicate sorts first in the drop pool (val 0)",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _bench, [], drop_needed=False, protected_ids=set(),
+          extra=[{"id": "k2", "name": "DupK", "pos": "K", "val": 0}])]
+      == ["Isiah Pacheco", "DupK", "Michael Pittman", "Jahmyr Gibbs"])
+check("dup-K: protected extra is excluded from the drop pool",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _bench, [], drop_needed=False, protected_ids={"k2"},
+          extra=[{"id": "k2", "name": "DupK", "pos": "K", "val": 0}])]
+      == ["Isiah Pacheco", "Michael Pittman", "Jahmyr Gibbs"])
+check("dup-K: reserve extra excluded on a FULL roster",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _bench, ["k2"], drop_needed=True, protected_ids=set(),
+          extra=[{"id": "k2", "name": "DupK", "pos": "K", "val": 0}])]
+      == ["Isiah Pacheco", "Michael Pittman", "Jahmyr Gibbs"])
+_R8D, _D8D = fi.clog_audit(
+    [{"sid": "k1", "name": "OnlyK", "pos": "K", "val": 0, "inj": ""},
+     {"sid": "k2", "name": "DupK", "pos": "K", "val": 0, "inj": ""},
+     {"sid": "1", "name": "Clogger", "pos": "WR", "val": 1000, "inj": ""}],
+    droppable_unpriced={"k2"})
+check("G8: duplicate K is a drop candidate, lone K still never is",
+      _D8D == ["DupK", "Clogger"])
+
 
 # --- G9: bye craters ---
 _CR = fi.bye_craters({"1": 7, "2": 7, "3": 8}, ["1", "2", "3"],
@@ -4080,6 +4138,90 @@ try:
 finally:
     tb.get = _orig_get12
     sys.argv = _orig_argv12
+
+# --- duplicate K/DEF live pin (2026-11-15) -------
+# The expected droppable duplicates are derived from the board's own
+# roster lines (FP ranks + [ON BYE]/[!STATUS] tags), not hardcoded, so
+# the pin tracks roster moves. Positive: a duplicate behind a healthy,
+# non-bye keeper must be the DROP on a non-K/DEF suggested move AND in
+# DROP CANDIDATES. Negative: with no duplicate, no non-K/DEF suggested
+# move may drop a K/DEF (the K/DEF branch's own ADD K/DEF / DROP
+# current-unit moves are excluded — they are the legitimate stream).
+def _kdef_units_of(out):
+    units = {}
+    for ln in out.splitlines():
+        m = re.match(r"  (K|DEF): (.+)$", ln)
+        if not m:
+            continue
+        parsed = []
+        for s in [x.strip() for x in m.group(2).split(", ")]:
+            rm = re.match(r"^(?P<name>.+?)\(FP-ROS #(?P<rank>\d+)\)"
+                          r"(?P<tags>.*)$", s)
+            if not rm:
+                return None  # FP feed down ("unpriced") — not evaluable
+            parsed.append((rm.group("name"), int(rm.group("rank")),
+                           "[ON BYE" in rm.group("tags"),
+                           bool(re.search(
+                               r"\[!(Out|IR|Doubtful|Suspended)\]",
+                               rm.group("tags")))))
+        units[m.group(1)] = parsed
+    return units or None
+
+
+def _droppable_dup_kdef(out):
+    units = _kdef_units_of(out)
+    if units is None:
+        return None
+    dups = []
+    for lst in units.values():
+        if len(lst) < 2:
+            continue
+        keeper = min(lst, key=lambda t: t[1])
+        if keeper[2] or keeper[3]:
+            continue  # keeper on bye or hurt — duplicate is the cover
+        dups.extend(n for n, _, _, _ in lst if n != keeper[0])
+    return dups
+
+
+def _non_kdef_moves(out):
+    # ADD name carries no parens, so [^(]+ cannot span into the DROP
+    # segment — a greedy .+ would match the DROP's "(K,0)" and wrongly
+    # exclude the very moves this pin checks.
+    return [ln for ln in _suggested_moves_of(out)
+            if not re.match(r"  ADD [^(]+ \((K|DEF),", ln)]
+
+
+for _lg, _o in ((SNAPUSA, run_board(SNAPUSA).stdout),
+                (WW, run_board(WW).stdout)):
+    _dups = _droppable_dup_kdef(_o)
+    if _dups is None:
+        print(f"  (dup-K live pin {_lg}: FP ranks unpriced — skipping)")
+        continue
+    _moves = _non_kdef_moves(_o)
+    _dc = [ln for ln in _o.splitlines()
+           if ln.strip().startswith("DROP CANDIDATES:")]
+    if _dups:
+        for _d in _dups:
+            check(f"dup-K: live {_lg} — {_d} is the DROP on a suggested "
+                  f"move",
+                  any(f"DROP {_d} (K,0)" in ln or f"DROP {_d} (DEF,0)" in ln
+                      for ln in _moves),
+                  f"moves: {_moves}")
+            check(f"dup-K: live {_lg} — {_d} is a DROP CANDIDATE",
+                  any(_d in ln for ln in _dc),
+                  f"candidates: {_dc}")
+    else:
+        _kdef_names = [n for lst in (_kdef_units_of(_o) or {}).values()
+                       for n, _, _, _ in lst]
+        check(f"dup-K: live {_lg} — no K/DEF is a suggested-move DROP "
+              f"without a duplicate",
+              not any(re.search(r"DROP (.+?) \((K|DEF),", ln)
+                      for ln in _moves),
+              f"moves: {_moves}")
+        check(f"dup-K: live {_lg} — no K/DEF is a DROP CANDIDATE "
+              f"without a duplicate",
+              not any(n in ln for n in _kdef_names for ln in _dc),
+              f"candidates: {_dc}")
 
 print()
 if failures:
