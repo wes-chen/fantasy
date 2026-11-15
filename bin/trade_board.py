@@ -441,7 +441,8 @@ def legal_drops(bench, reserve_ids, drop_needed):
     return list(bench)
 
 
-def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids):
+def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids,
+                     extra=None):
     """DROP pool for waiver ADD/DROP suggestions (G8 unification).
 
     legal_drops() answers only "is the drop legal" (E14 slot math). The
@@ -452,10 +453,29 @@ def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids):
     helper the two sections disagreed: suggested moves could drop a
     protected player the audit listed as protected two lines below.
     protected_ids: Sleeper player ids (str) in the G8 protection sets.
+    extra: additional bench-shaped dicts to consider as drops (2026-11-15:
+    duplicate K/DEF units from duplicate_kdef_drops() — the bench arg
+    covers QB/RB/WR/TE only, so a second kicker never entered the pool).
+    Extras pass the same legal + protected filters, and the pool is
+    re-sorted by value ascending so a val-0 duplicate sorts first — it
+    is the cheapest drop on the roster.
     """
     pool = legal_drops(bench, reserve_ids, drop_needed)
     prot = {str(x) for x in (protected_ids or [])}
-    return [b for b in pool if str(b.get("id")) not in prot]
+    pool = [b for b in pool if str(b.get("id")) not in prot]
+    if extra:
+        res = {str(x) for x in (reserve_ids or [])}
+        for b in extra:
+            if str(b.get("id")) in prot:
+                continue
+            if drop_needed and str(b.get("id")) in res:
+                continue
+            pool.append(b)
+        # The call site sorts bench by value ascending before this call,
+        # so re-sorting here is a no-op there — but it pins the extras
+        # (val 0) first even if a caller passes an unsorted bench.
+        pool.sort(key=lambda b: b.get("val", 0) or 0)
+    return pool
 
 
 def closes_coverage_gap(pos, drop_pos, gap_poses):
@@ -1066,6 +1086,51 @@ def kdef_bye_replacement(fa_list, nfl_week, kdef_fp, kdef_byes):
         return kdef_fp.get(t[3], (None, None))[0]
 
     return min(cands, key=lambda t: (_rank(t) is None, _rank(t) or 0))
+
+
+def duplicate_kdef_drops(units, kdef_fp, players, kdef_byes, nfl_week,
+                         lineup_ids=None):
+    """Duplicate K/DEF units that are safe to name as drops for a
+    non-K/DEF waiver ADD (2026-11-15).
+
+    The waiver drop pool is built from the QB/RB/WR/TE bench only, and the
+    G8 clog audit never names an unpriced player as a drop — so a second
+    kicker (or second defense) was unnameable in both surfaces even when
+    it was the cheapest, most droppable spot on the roster. Live case:
+    Wesley carries Eddy Pineiro (FP-ROS #7, starting) and Chase
+    McLaughlin (FP-ROS #9, bench, on bye W10) in snapusa; the Nov 14
+    ADD Daniels / DROP McLaughlin call had to be hand-derived because
+    the engine could not name McLaughlin anywhere.
+
+    units: my roster's units at ONE position (K or DEF), bypos entries
+    with "id" (starters included — the keeper is picked from all of
+    them). Keeper = best FantasyPros ROS rank (None rank sorts last,
+    then list order — the same stable fallback the K/DEF branch uses).
+    A duplicate is droppable only when the keeper is healthy and not on
+    bye this week: otherwise the duplicate is the cover, not dead
+    weight. Starters are never returned — a drop is always a bench
+    player. Returns [sid, ...] of droppable duplicates; [] when fewer
+    than 2 units, or when the keeper is hurt/on bye.
+    """
+    units = list(units or [])
+    if len(units) < 2:
+        return []
+    lineup = {str(x) for x in (lineup_ids or [])}
+
+    def _sid(u):
+        return str(u.get("sid") or u.get("id") or "")
+
+    def _rank(u):
+        r = (kdef_fp.get(_sid(u), (None, None)) or (None, None))[0]
+        return (r is None, r if r is not None else 0)
+
+    keeper = min(units, key=_rank)
+    kid = _sid(keeper)
+    kinj = ((players.get(kid, {}) or {}).get("injury_status") or "")
+    if kinj in HURT or kdef_byes.get(kid) == nfl_week:
+        return []  # duplicate is the cover this week, not dead weight
+    return [_sid(u) for u in units
+            if _sid(u) and _sid(u) != kid and _sid(u) not in lineup]
 
 
 def on_bye_this_week_tag(bye_week, nfl_week):
@@ -2411,8 +2476,21 @@ def main():
         _prot |= {str(s) for s in onblock}
     except Exception:  # noqa: BLE001 — degrade to the old legal-only pool
         _prot = set()
-    _drop_pool = waiver_drop_pool(bench, _sm["reserve_ids"],
-                                  _sm["drop_needed"], _prot)
+    # 2026-11-15: a duplicate K/DEF is the cheapest drop on the roster,
+    # but the pool above is built from the QB/RB/WR/TE bench only — a
+    # second kicker could never be named as a DROP. The same set feeds
+    # the G8 clog audit below, so the two sections still agree on who
+    # is droppable.
+    _dup_kdef = set()
+    for _pos in ("K", "DEF"):
+        _dup_kdef |= set(duplicate_kdef_drops(
+            me["bypos"].get(_pos, []), kdef_fp, players, kdef_byes,
+            nfl_week, lineup_ids=my_lineup_ids))
+    _drop_pool = waiver_drop_pool(
+        bench, _sm["reserve_ids"], _sm["drop_needed"], _prot,
+        extra=[b for _pos in ("K", "DEF")
+               for b in me["bypos"].get(_pos, [])
+               if str(b["id"]) in _dup_kdef])
 
     sug = []
     _claimed_skipped = 0  # pending-claim registry: never re-recommend an ADD
@@ -2579,7 +2657,7 @@ def main():
         _ranked, _drops = fi.clog_audit(
             _ball, handcuff_of=_hcuff, ahead_out=_ahead,
             rising={s: True for s in (buy_low_sids | recent_sids)},
-            onblock=set(onblock))
+            onblock=set(onblock), droppable_unpriced=_dup_kdef)
         for _r in _ranked[:6]:
             _tags = ("[handcuff]" if _r["sid"] in _hcuff else "") + \
                     ("[ahead-out]" if _r["sid"] in _ahead else "") + \
