@@ -227,6 +227,39 @@ claim) plus a source-count pin on the shared helper. Note the
 trending-velocity line stays untagged — same reasoning as the teamless
 note above, it is a signal line, not a recommendation surface.
 
+### Duplicate K/DEF is droppable (2026-11-15)
+
+The drop pool is built from the QB/RB/WR/TE bench only, and the G8
+clog audit never names an unpriced player as a drop — so a second
+kicker (or defense) was unnameable in both surfaces even when it was
+the cheapest, most droppable spot on the roster. Live case: snapusa
+carries Eddy Pineiro (FP-ROS #7, starting) and Chase McLaughlin
+(FP-ROS #9, bench, on bye W10); the Nov 14 ADD Daniels / DROP
+McLaughlin call had to be hand-derived because the engine printed
+"(no FA beats your droppable bench)" with no DROP CANDIDATES line at
+all. `duplicate_kdef_drops()` (trade_board.py, next to the other K/DEF
+helpers) picks the keeper by best FantasyPros ROS rank (None rank sorts
+last, then list order — the same stable fallback the K/DEF branch uses)
+and returns the other units, but only when the keeper is healthy and
+not on bye this week — otherwise the duplicate is the cover, not dead
+weight — and never a starter. The call site feeds the set into
+`waiver_drop_pool(..., extra=...)` (same legal + protected filters,
+re-sorted by value so the val-0 duplicate lands first) and into
+`clog_audit(..., droppable_unpriced=...)` (the `val > 0` guard gains
+the duplicate exception; contingent 0 <= val 0 still applies), so the
+two sections keep agreeing on who is droppable. A lone K/DEF is
+unchanged: never a drop in either surface. The golden suite pins it
+with unit checks (keeper hurt / on bye / better-ranked bench keeper /
+missing ranks / pool ordering / protected + reserve extras / clog
+exception) and a live biconditional per league derived from the board's
+own roster lines (FP ranks + [ON BYE]/[!STATUS] tags). Live after the
+change, snapusa suggests ADD Estime / Harrison Jr. / Higbee, all
+DROP McLaughlin, and DROP CANDIDATES names him; WW (single K, single
+DEF) is unchanged. Known adjacent gap, not built here: the K/DEF
+upgrade branch takes `mine[0]` (roster order) as the current unit
+instead of the best-ranked one, so its rank comparison can use the
+bench unit when a duplicate is present.
+
 ### Suggested-move bye-week tag (2026-10-26)
 
 The mirror case #30 left open: the RECOMMENDED player on bye, not his
