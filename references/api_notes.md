@@ -255,10 +255,28 @@ exception) and a live biconditional per league derived from the board's
 own roster lines (FP ranks + [ON BYE]/[!STATUS] tags). Live after the
 change, snapusa suggests ADD Estime / Harrison Jr. / Higbee, all
 DROP McLaughlin, and DROP CANDIDATES names him; WW (single K, single
-DEF) is unchanged. Known adjacent gap, not built here: the K/DEF
-upgrade branch takes `mine[0]` (roster order) as the current unit
-instead of the best-ranked one, so its rank comparison can use the
-bench unit when a duplicate is present.
+DEF) is unchanged.
+
+### K/DEF branch uses the keeper, not roster order (2026-11-16)
+
+The adjacent gap named above is now built: the K/DEF suggestion
+branch took `mine[0]` (roster order) as the current unit, but K/DEF
+carry no FantasyCalc value, so the val sort feeding `mine` is a no-op
+and list order decided. `kdef_keeper()` (trade_board.py, next to the
+other K/DEF helpers) picks the best FP-ROS rank (None rank sorts last,
+then list order — the same stable fallback the duplicate audit uses),
+and the branch now takes its current unit from it; `duplicate_kdef_drops()`
+calls the same helper, so the two definitions can never drift. The
+upgrade gate, the hurt/bye forced-replacement branches, and the
+pending-claim bye exemption all compare against the keeper now. The
+old failure modes: an FA worse than the keeper could pass the gate off
+the bench unit's rank (churning a waiver slot for a bench cover that
+never starts), and a hurt/on-bye bench unit could trigger a forced
+replacement the healthy keeper never needed. Pinned with unit checks
+(best-ranked-when-listed-second / missing ranks / unranked-never-beats-
+ranked / sid-keyed / empty) plus a source-count pin and a live pin per
+league (every suggested K/DEF move drops the keeper; upgrade moves
+clear the gate against the keeper's rank).
 
 ### Suggested-move bye-week tag (2026-10-26)
 
