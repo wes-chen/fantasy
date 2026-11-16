@@ -2201,6 +2201,32 @@ check("dup-K: reserve extra excluded on a FULL roster",
           _bench, ["k2"], drop_needed=True, protected_ids=set(),
           extra=[{"id": "k2", "name": "DupK", "pos": "K", "val": 0}])]
       == ["Isiah Pacheco", "Michael Pittman", "Jahmyr Gibbs"])
+
+# 2026-11-16: kdef_keeper — the K/DEF suggestion branch compared the top
+# FA against mine[0] (roster order: the val sort is a no-op for unpriced
+# K/DEF), so a bench unit could stand in for the keeper: an FA worse
+# than the keeper could pass the upgrade gate, and a hurt/on-bye bench
+# unit could trigger a forced replacement the healthy keeper never
+# needed. The keeper is the best FP-ROS rank, not list order.
+_KEEP_UNITS = [{"id": "k2", "name": "DupK", "pos": "K", "val": 0},
+               {"id": "k1", "name": "StarterK", "pos": "K", "val": 0}]
+check("kdef-keeper: best-ranked unit wins even when listed second",
+      tb.kdef_keeper(_KEEP_UNITS, _DUP_FP)["id"] == "k1")
+check("kdef-keeper: single unit is the keeper",
+      tb.kdef_keeper(_KEEP_UNITS[:1], _DUP_FP)["id"] == "k2")
+check("kdef-keeper: missing ranks fall back to list order",
+      tb.kdef_keeper(_KEEP_UNITS, {})["id"] == "k2")
+check("kdef-keeper: unranked unit never beats a ranked one",
+      tb.kdef_keeper(_KEEP_UNITS, {"k1": (7, 8)})["id"] == "k1")
+check("kdef-keeper: empty units returns None",
+      tb.kdef_keeper([], _DUP_FP) is None)
+check("kdef-keeper: sid-keyed units resolve the same way",
+      tb.kdef_keeper([{"sid": "k2", "name": "DupK"},
+                      {"sid": "k1", "name": "StarterK"}],
+                     _DUP_FP)["sid"] == "k1")
+check("kdef-keeper: branch + duplicate-audit share the one helper",
+      _src.count("kdef_keeper(") >= 3,
+      f"count={_src.count('kdef_keeper(')}")
 _R8D, _D8D = fi.clog_audit(
     [{"sid": "k1", "name": "OnlyK", "pos": "K", "val": 0, "inj": ""},
      {"sid": "k2", "name": "DupK", "pos": "K", "val": 0, "inj": ""},
@@ -4222,6 +4248,44 @@ for _lg, _o in ((SNAPUSA, run_board(SNAPUSA).stdout),
               f"without a duplicate",
               not any(n in ln for n in _kdef_names for ln in _dc),
               f"candidates: {_dc}")
+
+# --- K/DEF keeper live pin (2026-11-16) -------
+# Any suggested ADD K/DEF / DROP X move must drop the keeper — the
+# best-ranked unit at that position per the board's own roster lines —
+# never the roster-order-first unit. Upgrade moves (FP-ROS # on the
+# ADD) must also clear the gate against the keeper's rank, not the
+# bench unit's. Vacuous when no K/DEF move is suggested today; the
+# DROP segment is "(K,FP-ROS #N)" on upgrade moves and bare "(K)" on
+# forced-replacement moves, so both shapes are parsed.
+for _lg, _o in ((SNAPUSA, run_board(SNAPUSA).stdout),
+                (WW, run_board(WW).stdout)):
+    _units = _kdef_units_of(_o)
+    _kmoves = [ln for ln in _suggested_moves_of(_o)
+               if re.match(r"  ADD [^(]+ \((K|DEF)(?:,|\))", ln)]
+    if _units is None:
+        print(f"  (kdef-keeper live pin {_lg}: FP ranks unpriced — skipping)")
+        continue
+    if not _kmoves:
+        print(f"  (kdef-keeper live pin {_lg}: no K/DEF move — vacuous)")
+        continue
+    for _ln in _kmoves:
+        _dm = re.search(r"DROP (.+?) \((K|DEF)(?:,|\))", _ln)
+        if _dm is None or _dm.group(2) not in _units:
+            print(f"  (kdef-keeper live pin {_lg}: unparseable move — "
+                  f"skipping: {_ln})")
+            continue
+        _keeper = min(_units[_dm.group(2)], key=lambda t: t[1])
+        check(f"kdef-keeper: live {_lg} — K/DEF move drops the keeper, "
+              f"not roster order",
+              _dm.group(1) == _keeper[0],
+              f"move: {_ln} // keeper: {_keeper[0]} (#{_keeper[1]})")
+        _am = re.search(r"ADD [^(]+ \((K|DEF),FP-ROS #(\d+)\)", _ln)
+        if _am:
+            check(f"kdef-keeper: live {_lg} — upgrade gate clears "
+                  f"against the keeper's rank",
+                  int(_am.group(2)) + tb.KDEF_RANK_GAP <= _keeper[1]
+                  and int(_am.group(2)) <= tb.KDEF_STREAM_TOP,
+                  f"move: {_ln} // keeper: {_keeper[0]} (#{_keeper[1]})")
 
 print()
 if failures:
