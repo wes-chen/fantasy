@@ -1088,6 +1088,34 @@ def kdef_bye_replacement(fa_list, nfl_week, kdef_fp, kdef_byes):
     return min(cands, key=lambda t: (_rank(t) is None, _rank(t) or 0))
 
 
+def kdef_keeper(units, kdef_fp):
+    """Best-ranked K/DEF unit on the roster (the keeper) — 2026-11-16.
+
+    FantasyPros ROS rank, lowest first; unranked sorts last, then list
+    order — the same stable fallback duplicate_kdef_drops() uses.
+    K/DEF carry no FantasyCalc value, so sorting by val is a no-op and
+    roster order would decide: the waiver suggestion branch compared
+    the top FA against whichever unit happened to be listed first, so a
+    bench unit could stand in for the keeper — an FA worse than the
+    keeper could pass the upgrade gate (and churn a waiver slot for a
+    bench cover that never starts), and a hurt/on-bye bench unit could
+    trigger a forced replacement the healthy keeper never needed.
+    Returns the unit dict, or None when units is empty.
+    """
+    units = list(units or [])
+    if not units:
+        return None
+
+    def _sid(u):
+        return str(u.get("sid") or u.get("id") or "")
+
+    def _rank(u):
+        r = (kdef_fp.get(_sid(u), (None, None)) or (None, None))[0]
+        return (r is None, r if r is not None else 0)
+
+    return min(units, key=_rank)
+
+
 def duplicate_kdef_drops(units, kdef_fp, players, kdef_byes, nfl_week,
                          lineup_ids=None):
     """Duplicate K/DEF units that are safe to name as drops for a
@@ -1120,11 +1148,7 @@ def duplicate_kdef_drops(units, kdef_fp, players, kdef_byes, nfl_week,
     def _sid(u):
         return str(u.get("sid") or u.get("id") or "")
 
-    def _rank(u):
-        r = (kdef_fp.get(_sid(u), (None, None)) or (None, None))[0]
-        return (r is None, r if r is not None else 0)
-
-    keeper = min(units, key=_rank)
+    keeper = kdef_keeper(units, kdef_fp)
     kid = _sid(keeper)
     kinj = ((players.get(kid, {}) or {}).get("injury_status") or "")
     if kinj in HURT or kdef_byes.get(kid) == nfl_week:
@@ -2514,7 +2538,12 @@ def main():
                          in fa_by_pos[pos] if i not in HURT), None)
             if mine and _hfa:
                 _, _fan, _, _fapid = _hfa
-                if _fapid in claims and kdef_byes.get(mine[0]["id"]) != nfl_week:
+                # The current unit is the keeper (best FP-ROS rank),
+                # not roster order: K/DEF carry no FantasyCalc value,
+                # so the val sort above is a no-op and mine[0] was
+                # whichever unit happened to be listed first.
+                cur = kdef_keeper(mine, kdef_fp)
+                if _fapid in claims and kdef_byes.get(cur["id"]) != nfl_week:
                     # pending-claim registry (Oct 13-16 Chase lesson): he
                     # already filed for this player — never re-recommend.
                     # Exempt when his current unit is on bye this week:
@@ -2523,7 +2552,6 @@ def main():
                     # in the bye branch.
                     _claimed_skipped += 1
                     continue
-                cur = mine[0]
                 cur_inj = ((players.get(cur["id"], {}) or {})
                            .get("injury_status") or "")
                 _p = _path(_fapid)
