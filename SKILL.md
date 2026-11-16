@@ -113,7 +113,10 @@ means no fantasy points, so they are excluded from the top-FA lines, the
 suggested ADDs, and the IR stash hunt — the Nov 10 board recommended Koo
 as a K add before this filter)
 and the suggestion engine streams only decisive upgrades: a top-12 ROS
-unit 8+ ranks better than his current one, or a forced replacement when
+unit 8+ ranks better than his current one — "current" is the keeper,
+the best-ranked unit on the roster, not whichever unit is listed first
+(2026-11-16: K/DEF carry no FantasyCalc value, so roster order used to
+decide) — or a forced replacement when
 his unit is hurt (#20) or on bye this week (#30 — a bye-week unit scores
 zero; the replacement is the best-ranked healthy FA who is not on bye,
 any rank, and roster K/DEF lines carry [ON BYE W..] when the bye is this
