@@ -3060,16 +3060,20 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     check(f"{tag}: hold-vs-spend line present",
           "hold-vs-spend" in out and "P(better target emerges" in out)
     # E15: IR stash hunt — 14-team only, suppressed in the 4-team
-    # league and after the trade deadline (Week 11). When present, the
-    # section must print a body (candidates or the honest empty stub),
-    # never a bare header.
+    # league and after the trade deadline (the league's live
+    # trade_deadline setting — snapusa's moved 11 -> 13 between the
+    # Nov 11 and Nov 17 boards, so never hardcode the week here).
+    # When present, the section must print a body (candidates or the
+    # honest empty stub), never a bare header.
     if tag == "weekend-warriors":
         check(f"{tag}: IR stash hunt suppressed (4-team wire is an ocean)",
               "=== IR STASH HUNT" not in out)
     else:
         _w15 = re.search(r"NFL Week (\d+)", out)
         _wk15 = int(_w15.group(1)) if _w15 else 1
-        if _wk15 <= 11:
+        _d15 = re.search(r"trade deadline Week (\d+)", out)
+        _dl15 = int(_d15.group(1)) if _d15 else 11
+        if _wk15 <= _dl15:
             check(f"{tag}: IR stash hunt section present before deadline",
                   "=== IR STASH HUNT" in out)
             if "=== IR STASH HUNT" in out:
@@ -4117,24 +4121,36 @@ for _lg12, _o12 in ((SNAPUSA, out_snap), (WW, out_ww)):
           "trade proposals suppressed" not in _o12)
 
 # End-to-end post-deadline branch: in-process board runs with the Sleeper
-# state week faked to 12 (past the Week 11 deadline), everything else
-# live. Side effects match a normal board run (FC + G3 snapshots carry
-# real timestamps/values — only the week is faked).
+# state week faked past each league's own trade deadline (deadline+1 —
+# the deadline is the league's live trade_deadline setting, never a
+# hardcoded week: snapusa's moved 11 -> 13 between the Nov 11 and
+# Nov 17 boards, which is exactly what broke the old hardcoded-12
+# fake), everything else live. Side effects match a normal board run
+# (FC + G3 snapshots carry real timestamps/values — only the week is
+# faked).
 import io as _io12
 import contextlib as _ctxlib12
 _orig_get12 = tb.get
 _orig_argv12 = sys.argv[:]
+_fake_wk12 = {"week": 12}
 
 
 def _fake_week12(url, *a, **k):
     if url == f"{tb.SLEEPER}/state/nfl":
-        return {"week": 12}
+        return {"week": _fake_wk12["week"]}
     return _orig_get12(url, *a, **k)
+
+
+def _dl12(_o12):
+    _m12 = re.search(r"trade deadline Week (\d+)", _o12)
+    return int(_m12.group(1)) if _m12 else 11
 
 
 try:
     tb.get = _fake_week12
     for _lg12 in (SNAPUSA, WW):
+        _fake_wk12["week"] = _dl12(
+            out_snap if _lg12 == SNAPUSA else out_ww) + 1
         sys.argv = ["trade_board.py", "--league", _lg12, "--me", ME]
         _buf12 = _io12.StringIO()
         with _ctxlib12.redirect_stdout(_buf12):
@@ -4164,6 +4180,17 @@ try:
 finally:
     tb.get = _orig_get12
     sys.argv = _orig_argv12
+
+# The engine must read the deadline from the league's live settings,
+# not a hardcoded week — the printed deadline matches Sleeper's
+# trade_deadline for each league (snapusa 13 / WW 11 as of Nov 17;
+# a future commissioner change moves both together).
+for _lg12, _o12 in ((SNAPUSA, out_snap), (WW, out_ww)):
+    _set12 = (tb.get(f"{tb.SLEEPER}/league/{_lg12}") or {}).get(
+        "settings") or {}
+    check(f"deadline gate: printed deadline is the live setting {_lg12}",
+          _dl12(_o12) == int(_set12.get("trade_deadline") or 11),
+          f"printed={_dl12(_o12)} setting={_set12.get('trade_deadline')}")
 
 # --- duplicate K/DEF live pin (2026-11-15) -------
 # The expected droppable duplicates are derived from the board's own
