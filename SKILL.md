@@ -264,7 +264,9 @@ be redundant):
 5. **Wesley's context.** Check MEMORY.md and the league's goal file before
    recommending: his untouchables, his pending waiver claims (never propose
    trading a player he doesn't have yet), his stated preferences
-   (e.g. holding Loveland for upside), and the trade deadline (Week 11).
+   (e.g. holding Loveland for upside), and the trade deadline (the
+   league's live `trade_deadline` setting — snapusa Week 13, WW
+   Week 11 as of Nov 17, 2026; the setting moved once, never assume).
 6. **League-size strategy.** snapusa (14-team Superflex) and weekend
    warriors (4-team 1-QB) are different sports:
    - 14-team: the wire is a desert. Trades are the only real improvement
@@ -323,7 +325,8 @@ be redundant):
      `ir_move_valid` gate — the player must not already be in `reserve`
      (the 9/23 no-op) and an IR slot must be open.
 8. **Season clock — short-term vs long-term balance.** The engine prints a
-   posture from the current NFL week and the Week 11 trade deadline.
+   posture from the current NFL week and each league's live trade
+   deadline (snapusa Week 13, WW Week 11 as of Nov 17, 2026).
    Early (W1-4): optimize for talent and role, not last week's points —
    slow starters with elite roles are buy-lows, and never rent a
    one-week wonder. Mid (W5-8): balanced — fill real starting-lineup
