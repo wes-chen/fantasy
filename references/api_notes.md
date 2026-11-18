@@ -494,3 +494,48 @@ weak pieces lose 50; lateral package gains 0; IR-discounted headliner
 loses 15; bye-cluster penalty 25 − 22 = 3, never a veto) plus live
 pins that every 2-for-1 row carries a positive tag, the header states
 the rule, and the partner-dropped note matches the mirror format.
+
+## Divergence-aware drop pool (2026-11-18)
+
+The waiver drop pool drops the cheapest droppable bench player by raw
+FantasyCalc value — and a stale-high number shields its owner from ever
+being the drop. The live case: the Nov 17 WW board suggested DROP
+healthy Patrick Mahomes (2150) for Burden/Likely/Skattebo while keeping
+Drake Maye (2158), out indefinitely with a fractured ankle — but Sleeper
+still carried no injury designation for Maye, so no E5 discount applied
+and the raw value ordered the pool. (FantasyCalc repriced Maye to 0 the
+next day, so the Nov 18 board already drops him; the hole is structural,
+not the one player — the next slow reprice will do the same thing.)
+
+The fix prices a CALC HIGHER-flagged bench player at his ECR-implied
+value for pool ordering, the churn gate, and the hold-vs-spend edge:
+`tb.divergence_adjusted_value(sid, fp, fval, players, rank_value)`
+returns the FantasyCalc value of the player at the ECR-implied overall
+rank (nearest rank when no player sits exactly there), built from the
+run's own settings-matched fval. Same gate as the divergence section:
+|FC rank − ECR rank| ≥ 12, CALC HIGHER direction only, and the same HURT
+veto — an Out/IR/Doubtful/Suspended player's divergence is a repricing
+artifact, not a signal (#28); Questionable stays adjustable, like the
+section itself. The adjustment never exceeds the raw value (a
+non-monotonic rank curve returns None, not a discount). The discount
+scales with the divergence by construction: a 12-spot gap discounts a
+little, a 110-spot gap (Daniel Jones, Nov 18: ECR 253 vs FC #143) a lot.
+
+`tb.waiver_drop_pool(..., adj={sid: implied})` attaches the adjusted
+value as `dval` on shallow copies and sorts/gates on it; `val` stays the
+raw FantasyCalc number for display. The move line carries
+`[CALC HIGHER: ECR-implied N]` via `tb.div_adjust_tag` at both DROP
+render sites (suggested moves and the IR stash hunt — the stash DROP
+draws from the same pool). K/DEF have no FC value and no ECR in fp, so
+they adjust to nothing, and an empty fp degrades to a no-op. The G8
+clog audit is untouched: it ranks by contingent value, a different
+concept, so the two sections can order a flagged player differently —
+the suggestion engine is the decision surface. Golden tests: unit
+checks for the helper (CALC HIGHER / ECR HIGHER / sub-threshold /
+exactly-12 boundary / HURT veto / Questionable / missing ECR or rank /
+nearest-rank fallback / never-exceeds-raw / empty map), pool-ordering
+checks (the Maye/Mahomes flip, dval carried with raw untouched,
+protected exclusion still wins), tag checks, source-count pins (helper
+call sites == 2, tag call sites == 3), and a live pin that any tagged
+DROP names a CALC HIGHER-flagged player (vacuous Nov 18 — no flagged
+player is a chosen DROP on either board).
