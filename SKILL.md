@@ -180,8 +180,18 @@ CANDIDATES and the suggested ADD/DROP pairs; a lone K/DEF is never
 droppable, and when the keeper is hurt or on bye the duplicate is the
 cover, not a drop; the suggested ADD/DROP pairs draw their DROP from the
 same protected pool, so the two sections never disagree on who is
-droppable; clog lines and DROP CANDIDATES carry [!STATUS] (2026-11-07
-mirror of the swap-row tag)).
+droppable; the DROP is the cheapest droppable bench player by
+FantasyCalc value — except a player flagged CALC HIGHER in the
+divergence section, whose drop value is his ECR-implied value (the
+FantasyCalc value at his ECR rank), so a stale-high number can't shield
+him from being the drop (2026-11-18: the Nov 17 Maye/Mahomes case,
+where a 2158 Maye out indefinitely shielded himself while healthy 2150
+Mahomes was the suggested drop); a drop priced that way carries
+`[CALC HIGHER: ECR-implied N]` on the move line, and the printed DROP
+value stays the raw FantasyCalc number. The same ECR-implied value
+drives the churn gate and the hold-vs-spend edge, so the gate never
+over-protects a stale-high bench player either; clog lines and DROP
+CANDIDATES carry [!STATUS] (2026-11-07 mirror of the swap-row tag)).
 A `=== PENDING OFFERS ===` section (ADV-FF-07) prints Wesley's own open
 offers and marks those players `[ON-BLOCK: ...]` in the roster — on-block
 is per-league (gh #26): an open snapusa offer never blocks the same player
