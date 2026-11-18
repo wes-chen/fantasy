@@ -4081,6 +4081,110 @@ _dv_lines3, _dv_excl3 = tb.value_divergences(
 check("divergence: int player id still matches str-keyed players map",
       _dv_lines3 == [] and _dv_excl3 == 1)
 
+# ---------------- divergence-aware drop pool (2026-11-18) ----------------
+# The Nov 17 WW board suggested DROP healthy Patrick Mahomes (2150) for
+# Burden/Likely/Skattebo while keeping Drake Maye (2158) — out
+# indefinitely with a fractured ankle, but Sleeper still carried no
+# injury designation, so no discount applied and the raw FantasyCalc
+# value shielded him: the pool drops the cheapest bench player, and the
+# inflated player is never the cheapest. The fix prices a CALC HIGHER-
+# flagged bench player at his ECR-implied value (FantasyCalc value at
+# his ECR rank) for pool ordering and the churn gate — the same two
+# feeds, same >=12-spot gate, same HURT veto as the divergence section.
+# The discount scales with the divergence: a 12-spot gap discounts a
+# little, a 110-spot gap (Daniel Jones, Nov 18: ECR 253 vs FC #143) a lot.
+_dav_fp = {
+    "u_calc": (11, 80, 60), "u_ecr": (11, 50, 60),
+    "u_small": (11, 60, 60), "u_bound": (11, 62, 60),
+    "u_out": (11, 80, 60), "u_q": (11, 80, 60),
+    "u_near": (11, 74, 60), "u_flat": (11, 80, 60),
+    "u_norank": (11, 80, 60),
+}
+_dav_fval = {k: (1500, 0, 50, 0, False) for k in _dav_fp}
+_dav_fval["u_ecr"] = (1500, 0, 80, 0, False)
+_dav_fval["u_flat"] = (100, 0, 50, 0, False)
+_dav_rank_value = {50: 1500, 54: 1400, 60: 1200, 62: 1150, 66: 1000,
+                   72: 900, 75: 850, 80: 800, 100: 500, 143: 281,
+                   189: 150, 253: 40}
+_dav_players = {
+    "u_out": {"injury_status": "Out"},
+    "u_q": {"injury_status": "Questionable"},
+}
+check("divergence-aware pool: CALC HIGHER adjusts to ECR-rank value",
+      tb.divergence_adjusted_value("u_calc", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) == 800)
+check("divergence-aware pool: ECR HIGHER never adjusts (only CALC HIGHER)",
+      tb.divergence_adjusted_value("u_ecr", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) is None)
+check("divergence-aware pool: sub-threshold gap (<12) does not adjust",
+      tb.divergence_adjusted_value("u_small", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) is None)
+check("divergence-aware pool: exactly-12 gap adjusts (boundary)",
+      tb.divergence_adjusted_value("u_bound", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) == 1150)
+check("divergence-aware pool: Out player excluded (HURT veto mirrors #28)",
+      tb.divergence_adjusted_value("u_out", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) is None)
+check("divergence-aware pool: Questionable still adjusts (playable)",
+      tb.divergence_adjusted_value("u_q", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) == 800)
+check("divergence-aware pool: missing ECR / unpriced never adjust",
+      tb.divergence_adjusted_value("u_noecr", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) is None
+      and tb.divergence_adjusted_value(
+          "u_norank", _dav_fp,
+          dict(_dav_fval, u_norank=(1500, 0, 999, 0, False)),
+          _dav_players, _dav_rank_value) is None)
+check("divergence-aware pool: nearest rank stands in (ECR 74 -> rank 75)",
+      tb.divergence_adjusted_value("u_near", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) == 850)
+check("divergence-aware pool: adjustment never exceeds the raw value",
+      tb.divergence_adjusted_value("u_flat", _dav_fp, _dav_fval,
+                                   _dav_players, _dav_rank_value) is None)
+check("divergence-aware pool: empty rank map never adjusts",
+      tb.divergence_adjusted_value("u_calc", _dav_fp, _dav_fval,
+                                   _dav_players, {}) is None)
+_dp_bench = [
+    {"id": "p_maye", "name": "Stale QB", "pos": "QB", "val": 2158},
+    {"id": "p_mahomes", "name": "Healthy QB", "pos": "QB", "val": 2150},
+    {"id": "p_zero", "name": "Zero RB", "pos": "RB", "val": 0},
+]
+check("divergence-aware pool: stale-high sorts first on ECR-implied value",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _dp_bench, [], drop_needed=False, protected_ids=[],
+          adj={"p_maye": 300})]
+      == ["Zero RB", "Stale QB", "Healthy QB"])
+check("divergence-aware pool: dval carried, raw val untouched for display",
+      (lambda _p: _p[1]["dval"] == 300 and _p[1]["val"] == 2158)(
+          tb.waiver_drop_pool(_dp_bench, [], drop_needed=False,
+                              protected_ids=[], adj={"p_maye": 300})))
+check("divergence-aware pool: no adj -> raw-value order unchanged "
+      "(bench pre-sorted by val, as the call site does)",
+      [b["name"] for b in tb.waiver_drop_pool(
+          sorted(_dp_bench, key=lambda b: b["val"]), [],
+          drop_needed=False, protected_ids=[])]
+      == ["Zero RB", "Healthy QB", "Stale QB"])
+check("divergence-aware pool: adjusted player still excluded when protected",
+      [b["name"] for b in tb.waiver_drop_pool(
+          _dp_bench, [], drop_needed=False, protected_ids=["p_maye"],
+          adj={"p_maye": 300})]
+      == ["Zero RB", "Healthy QB"])
+check("div_adjust_tag: adjusted drop carries the tag",
+      tb.div_adjust_tag({"val": 2158, "dval": 300})
+      == " [CALC HIGHER: ECR-implied 300]")
+check("div_adjust_tag: unadjusted drop has no tag",
+      tb.div_adjust_tag({"val": 2150, "dval": 2150}) == "")
+check("div_adjust_tag: entries without dval never tag",
+      tb.div_adjust_tag({"val": 100}) == "")
+check("divergence-aware pool: single application point for the helper "
+      "(def + 1 call site in main)",
+      _src.count("divergence_adjusted_value(") == 2,
+      f"count={_src.count('divergence_adjusted_value(')}")
+check("div_adjust_tag: wired into both DROP render sites (suggested moves "
+      "+ IR stash hunt)",
+      _src.count("div_adjust_tag(") == 3,
+      f"count={_src.count('div_adjust_tag(')}")
+
 # ---------------- redraft-only age rule (2026-10-28) ----------------
 # Wesley's 2026-10-26 correction: snapusa is REDRAFT — price rest-of-season
 # points only; age/future years are irrelevant. The old layer-4 line
@@ -4313,6 +4417,29 @@ for _lg, _o in ((SNAPUSA, run_board(SNAPUSA).stdout),
                   int(_am.group(2)) + tb.KDEF_RANK_GAP <= _keeper[1]
                   and int(_am.group(2)) <= tb.KDEF_STREAM_TOP,
                   f"move: {_ln} // keeper: {_keeper[0]} (#{_keeper[1]})")
+
+# --- divergence-aware drop pool live pin (2026-11-18) -------
+# Any suggested/stash DROP carrying the [CALC HIGHER: ECR-implied N]
+# tag must name a player the divergence section flags CALC HIGHER —
+# the tag is the only place the drop's priced value is disclosed, so a
+# tag on an unflagged player would be a lie. The reverse direction
+# (every flagged DROP is tagged) is pinned by the unit checks above;
+# live it is vacuous today — no flagged player is a chosen DROP on
+# either board (WW drops Maye, Out/excluded; snapusa drops Garoppolo,
+# unflagged) — so this pin only fires when a stale-high bench player
+# actually becomes the drop.
+for _lg, _o in ((SNAPUSA, out_snap), (WW, out_ww)):
+    _flagged = {re.sub(r"\[![^\]]*\]", "", n) for n in re.findall(
+        r"^  (.+?): ECR \d+ vs FC #\d+ -> CALC HIGHER", _o, re.M)}
+    _tagged_drops = re.findall(
+        r"/ DROP (.+?) \([^)]*\).*?\[CALC HIGHER: ECR-implied \d+\]", _o)
+    if not _tagged_drops:
+        print(f"  (div-pool live pin {_lg}: no tagged DROP — vacuous)")
+        continue
+    for _dn in _tagged_drops:
+        check(f"div-pool: live {_lg} — tagged DROP is CALC HIGHER-flagged",
+              _dn in _flagged,
+              f"drop: {_dn} // flagged: {sorted(_flagged)}")
 
 print()
 if failures:
