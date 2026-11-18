@@ -442,7 +442,7 @@ def legal_drops(bench, reserve_ids, drop_needed):
 
 
 def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids,
-                     extra=None):
+                     extra=None, adj=None):
     """DROP pool for waiver ADD/DROP suggestions (G8 unification).
 
     legal_drops() answers only "is the drop legal" (E14 slot math). The
@@ -459,6 +459,13 @@ def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids,
     Extras pass the same legal + protected filters, and the pool is
     re-sorted by value ascending so a val-0 duplicate sorts first — it
     is the cheapest drop on the roster.
+    adj: optional {str sid: ECR-implied value} from
+    divergence_adjusted_value (2026-11-18). When supplied, each entry
+    carries the adjusted value as "dval" and the pool sorts and gates on
+    dval, so a stale-high bench player can't shield himself from being
+    the drop; "val" stays the raw FantasyCalc number for display (see
+    div_adjust_tag). Without adj, dval is absent and behavior is exactly
+    the old one — the pool returns legal_drops' entries, in order.
     """
     pool = legal_drops(bench, reserve_ids, drop_needed)
     prot = {str(x) for x in (protected_ids or [])}
@@ -471,11 +478,33 @@ def waiver_drop_pool(bench, reserve_ids, drop_needed, protected_ids,
             if drop_needed and str(b.get("id")) in res:
                 continue
             pool.append(b)
+    _adj = adj or {}
+    if _adj:
+        pool = [dict(b, dval=_adj.get(str(b.get("id")),
+                                     b.get("val", 0) or 0)) for b in pool]
+    if extra or _adj:
         # The call site sorts bench by value ascending before this call,
-        # so re-sorting here is a no-op there — but it pins the extras
-        # (val 0) first even if a caller passes an unsorted bench.
-        pool.sort(key=lambda b: b.get("val", 0) or 0)
+        # so re-sorting here is a no-op without adj — but it pins the
+        # extras (val 0) first even if a caller passes an unsorted bench,
+        # and with adj it orders by the ECR-implied value. Without either,
+        # the pool keeps the caller's order exactly (the E14 check pins
+        # waiver_drop_pool == legal_drops in that case).
+        pool.sort(key=lambda b: b.get("dval", b.get("val", 0) or 0))
     return pool
+
+
+def div_adjust_tag(b):
+    """Move-line tag for a divergence-adjusted drop (2026-11-18).
+
+    The printed DROP value is the raw FantasyCalc number, so a drop
+    chosen on its ECR-implied value says so — otherwise the Tuesday
+    worker would "correct" the drop back to the stale-high player.
+    """
+    dval = b.get("dval", b.get("val", 0) or 0)
+    val = b.get("val", 0) or 0
+    if dval < val:
+        return f" [CALC HIGHER: ECR-implied {int(dval)}]"
+    return ""
 
 
 def closes_coverage_gap(pos, drop_pos, gap_poses):
@@ -788,6 +817,50 @@ def value_divergences(bypos, fp, fval, players, eff_slots):
                          f"vs FC #{fcovr} -> {lbl}"))
     lines = [ln for _, ln in sorted(divs, reverse=True)[:10]]
     return lines, excluded
+
+
+def divergence_adjusted_value(sid, fp, fval, players, rank_value):
+    """ECR-implied FantasyCalc value for drop-pool ordering (2026-11-18).
+
+    A bench player flagged CALC HIGHER in the divergence section carries
+    a stale-high FantasyCalc number: FantasyCalc reprices injury/role
+    news slower than FantasyPros ECR. The raw value then shields him in
+    the waiver drop pool — the pool drops the cheapest bench player, so
+    the inflated player is never the drop while a healthy, cheaper
+    player is offered instead (the Nov 17 WW case: Drake Maye 2158, out
+    indefinitely with a fractured ankle but no Sleeper designation yet,
+    while healthy Patrick Mahomes 2150 was the suggested drop).
+    The adjustment is the FantasyCalc value of the player at the
+    ECR-implied overall rank — the same two feeds the divergence section
+    already compares, so no new signal is invented and the discount
+    scales with the divergence: a 12-spot gap discounts a little, a
+    110-spot gap (Daniel Jones, Nov 18) discounts a lot. Same gate as
+    the divergence section: |FC rank - ECR rank| >= 12, CALC HIGHER
+    direction only (FC rank better than ECR), and the HURT veto — an
+    Out/IR/Doubtful/Suspended player's divergence is a repricing
+    artifact, not a signal (#28). Returns the adjusted value, or None
+    when no adjustment applies (never more than the raw value).
+    rank_value: {overallRank: value} built from fval; the nearest
+    available rank stands in when no player sits exactly at the ECR
+    rank. K/DEF have no FC value and no ECR in fp, so they adjust to
+    nothing."""
+    ecr = (fp.get(sid) or (None, None, None))[1]
+    fcovr = (fval.get(sid) or (0, 999, 999, 0, False))[2]
+    if not ecr or fcovr is None or fcovr >= 999:
+        return None
+    if fcovr - ecr > -12:  # not CALC HIGHER by >= 12 spots
+        return None
+    inj = ((players.get(str(sid)) or {}).get("injury_status")) or ""
+    if inj in HURT:
+        return None
+    if not rank_value:
+        return None
+    raw = (fval.get(sid) or (0,))[0] or 0
+    nearest = min(rank_value, key=lambda r: abs(r - ecr))
+    adj = rank_value[nearest]
+    if adj >= raw:
+        return None
+    return adj
 
 
 def swap_delta(mine, theirs, me_bypos, dval_for, lineup_ids_fn,
@@ -2510,11 +2583,31 @@ def main():
         _dup_kdef |= set(duplicate_kdef_drops(
             me["bypos"].get(_pos, []), kdef_fp, players, kdef_byes,
             nfl_week, lineup_ids=my_lineup_ids))
+    # 2026-11-18: divergence-aware drop pool — a bench player flagged
+    # CALC HIGHER carries a stale-high FantasyCalc number, so the raw
+    # value shields him from being the DROP while a healthy, cheaper
+    # player is offered instead (Nov 17 WW: Maye 2158, out indefinitely
+    # with no Sleeper designation yet, while Mahomes 2150 was the drop).
+    # The ECR-implied value (FantasyCalc value at the ECR rank) is the
+    # calibrated discount — same feeds, same >=12-spot gate, same HURT
+    # veto as the divergence section. K/DEF have no FC value and no ECR
+    # in fp, so they adjust to nothing; an empty fp degrades to no-op.
+    _rank_value = {}
+    for _fv in fval.values():
+        if _fv[2] and _fv[2] < 999 and _fv[0]:
+            _rank_value.setdefault(_fv[2], _fv[0])
+    _div_adj = {}
+    for _b in bench:
+        _av = divergence_adjusted_value(_b["id"], fp, fval, players,
+                                        _rank_value)
+        if _av is not None:
+            _div_adj[str(_b["id"])] = _av
     _drop_pool = waiver_drop_pool(
         bench, _sm["reserve_ids"], _sm["drop_needed"], _prot,
         extra=[b for _pos in ("K", "DEF")
                for b in me["bypos"].get(_pos, [])
-               if str(b["id"]) in _dup_kdef])
+               if str(b["id"]) in _dup_kdef],
+        adj=_div_adj)
 
     sug = []
     _claimed_skipped = 0  # pending-claim registry: never re-recommend an ADD
@@ -2618,7 +2711,8 @@ def main():
             _claimed_skipped += 1
             continue
         for b in _drop_pool:
-            if fav > b["val"] * CHURN_THRESHOLD:
+            _dv = b.get("dval", b["val"])
+            if fav > _dv * CHURN_THRESHOLD:
                 _p = _path(fapid)
                 # Coverage-gap close: an ADD at an uncovered position is
                 # worth more than the raw edge — a second TE turns a
@@ -2634,8 +2728,10 @@ def main():
                        f"DROP {b['name']} ({b['pos']},{b['val']})"
                        + _pathtag(_p, fapid) + _closes
                        + on_bye_this_week_tag(
-                           fp.get(fapid, (None, None, None))[0], nfl_week))
-                sug.append((fav - b["val"], fav, b["val"], False, fapid, _p,
+                           fp.get(fapid, (None, None, None))[0], nfl_week)
+                       + div_adjust_tag(b))
+                sug.append((fav - _dv, fav, _dv, False, fapid,
+                            _p,
                             attach_plan_note(_ln, fapid, b["id"], plans)))
                 break
     sug.sort(key=lambda t: t[0], reverse=True)
@@ -2797,7 +2893,8 @@ def main():
             elif _drop_pool:
                 _dp = _drop_pool[0]
                 print(f"  ADD {_c['name']} ({_c['pos']}) / "
-                      f"DROP {_dp['name']} ({_dp['pos']},{_dp['val']}) — "
+                      f"DROP {_dp['name']} ({_dp['pos']},{_dp['val']})"
+                      f"{div_adjust_tag(_dp)} — "
                       f"IR stash, move to IR on add" + _pathtag(_sp, _c["sid"]))
             else:
                 print("  (no droppable bench — no stash move)")
