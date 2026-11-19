@@ -124,8 +124,9 @@ week); and the mirror case — a suggested ADD who is himself on bye this
 week carries [ON BYE W.. — scores zero this week] on the move line, so a
 Monday claim for a player who can't start Sunday says so (tag only, never
 a veto: the player can still be the right claim for rest-of-season value),
-and a top-FA player dropped within the waiver window carries the same
-`[CLAIM — clears ..., burns #N]` tag as a suggested move (2026-11-12
+and a top-FA player who is waiver-locked — dropped within the waiver
+window, or his team has kicked off and the next Tue run has not happened
+(2026-11-19 game lock) — carries the same `[CLAIM — clears ..., burns #N]` tag as a suggested move (2026-11-12
 Pineiro lesson — the Nov 10 board listed him as a plain FA while he was
 locked until Wed 11:34pm PT; FA NOW players stay untagged),
 and the G5 playoff-schedule tag on the same lines — every top-FA line
@@ -320,7 +321,13 @@ be redundant):
      dropped within the last ~2 days clears on his own drop-cooldown
      schedule (observed: Chase dropped Tue 10/13 ~1pm PT, cleared Thu
      ~12pm PT, ~47h — never waited for the weekly run) — do NOT quote
-     the weekly run for a fresh drop.
+     the weekly run for a fresh drop. But the drop clock is only half
+     the model: a player whose team has kicked off is waiver-locked
+     until the next Tue run whatever the drop clock says (2026-11-16:
+     four Monday "FA NOW" adds — Hutchinson, Perine, Meyers, Fields —
+     were really claims because their teams had played Sunday, and
+     they burned priority #10 to #14). A Monday-evening "add now" for a
+     player whose team played Sunday is a claim, not a free-agent add.
      A player carrying the engine's [CLAIM-PENDING] tag has a claim you
      already know about (pending_claims.md) — never re-recommend the ADD
      and never price the priority slot twice.
