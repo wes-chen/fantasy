@@ -227,6 +227,51 @@ claim) plus a source-count pin on the shared helper. Note the
 trending-velocity line stays untagged — same reasoning as the teamless
 note above, it is a signal line, not a recommendation surface.
 
+### Game lock on the waiver path (2026-11-19)
+
+The drop clock was only half the model. `acquisition_path()` /
+`claim_eta()` now apply TWO independent locks, and either one means
+a claim: (1) the drop clock — dropped within `waiver_clear_days`
+(2, read live from league settings); (2) the game lock — an unowned
+player whose NFL team has kicked off stays locked until the next
+weekly Tue run (snapusa 00:05 PT, WW 00:02 PT, `WAIVER_RUN_MINUTE`),
+whatever the drop clock says. `claim_eta()` renders the LATER of the
+two clears: a drop expiry past the run renders the drop-cooldown ETA,
+a run past the drop expiry renders the weekly-run label.
+
+Live case Nov 16: Monday evening's "FA NOW" adds — Hutchinson
+(dropped Thu 11/12 9:29am PT), Perine (dropped Mon 11/2 11:11pm PT),
+Meyers (dropped Sat 10/10 2:27pm PT), Fields (dropped Mon 11/9
+4:53pm PT) — all went through as waiver claims (Sleeper type=waiver)
+and burned snapusa priority #10 to #14, because their teams (HOU,
+CIN, CIN, NYG) had all played Sunday/Thursday and the Tue run had
+not happened. The old drop-only model called all four FA NOW. The
+positive control is Jordan Addison: dropped Sun 11/15 9:53am PT,
+MIN @ GB Sun 1:00pm ET, a free agent at the Tue 11/17 9:55am check —
+both locks lifted (run 00:05 + drop expiry 09:53), so he was a true
+FA add. The 48h drop clear itself is real (WW Ja'Marr Chase: dropped
+Tue 10/13 12:59pm PT, cleared Thu ~12:02pm PT; snapusa Chase
+McLaughlin: dropped Wed 10/21 10:19am PT, added as a free agent Fri
+10/23 6:05pm PT) — the game lock is the missing second half, not a
+replacement.
+
+Mechanics: `fi.load_game_kickoffs()` reads {team: kickoff epoch ms}
+for the current week from the cached nflverse `games.csv.gz`
+(`gameday` + `gametime` parsed as America/New_York; a bye-week team
+has no row and is never locked). `tb.game_clear_ms()` returns the
+next Tue run after the kickoff, or None when no lock applies;
+`tb.game_locked()` is the boolean over it, consulted by
+`acquisition_path()`, and `claim_eta()` takes the max of the drop
+expiry and the game clear. The board loads kickoffs once in the
+waiver section and degrades to the drop clock alone if the schedule
+file is unavailable — never a crash, never a faked schedule. The
+golden suite pins the predicate, both helpers, the Nov 16 backtest
+(real Week-10 kickoffs + real drop timestamps, all four claim;
+Addison Tue 9:55am fa), and the live top-FA CLAIM biconditional
+recompute now passes kickoffs too, so it cannot false-fail on a
+Sun–Tue board. The trending-velocity line stays untagged — a signal
+line, not a recommendation surface.
+
 ### Duplicate K/DEF is droppable (2026-11-15)
 
 The drop pool is built from the QB/RB/WR/TE bench only, and the G8
