@@ -43,7 +43,8 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 SLEEPER = "https://api.sleeper.app/v1"
 ESPN_CORE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
@@ -744,6 +745,46 @@ def posture_for(prob):
     return "LONGSHOT — stop buying: develop youth, sell vets for keepers"
 
 # ---------------------------------------------------------------- G5 playoff-week schedule weighting
+
+def load_game_kickoffs(games_gz, season="2026", week=None):
+    """{team: kickoff epoch ms} for one regular-season week.
+
+    nflverse games.csv `gameday` + `gametime` are Eastern time; parsed as
+    America/New_York so DST is handled, never a fixed offset (the 09:30
+    London game and the 20:15 night games all land on their true instant).
+    A team with no row that week (bye) is absent — absent means "no game",
+    never a phantom kickoff. Raises on an unreadable file; the caller
+    degrades (drop-clock-only waiver path), never fakes a schedule.
+    """
+    out = {}
+    opener = gzip.open if str(games_gz).endswith(".gz") else open
+    with opener(games_gz, "rt") as fh:
+        for r in csv.DictReader(fh):
+            if not _reg_game_row(r) or str(r.get("season") or "") != str(season):
+                continue
+            try:
+                wk = int(r.get("week") or 0)
+            except (TypeError, ValueError):
+                continue
+            if week is not None and wk != int(week):
+                continue
+            day = (r.get("gameday") or "").strip()
+            tm = (r.get("gametime") or "").strip()
+            if not day or not tm:
+                continue
+            try:
+                hh, mm = (int(x) for x in tm.split(":")[:2])
+                dt = datetime.strptime(day, "%Y-%m-%d").replace(
+                    hour=hh, minute=mm,
+                    tzinfo=ZoneInfo("America/New_York"))
+            except (ValueError, TypeError):
+                continue
+            ms = int(dt.timestamp() * 1000)
+            for t in (r.get("away_team"), r.get("home_team")):
+                if t:
+                    out[t] = ms
+    return out
+
 
 def load_playoff_opponents(games_gz, playoff_weeks, season="2026"):
     """{(team): [(week, opp_or_None)]} + [playoff weeks with no schedule rows].
