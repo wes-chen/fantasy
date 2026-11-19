@@ -13,7 +13,7 @@ Usage:
                  [--players-cache ~/workspace/sleeper/players.json]
 """
 import argparse, json, os, re, sys, time, urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -180,16 +180,76 @@ INJURY_DISCOUNT = {  # E5: discount stale values before RANKING (ADV-FF-10)
     "Doubtful": 0.7, "Questionable": 0.85,
 }
 
-def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None):
-    """FA NOW vs CLAIM (ADV-FF-18): a player dropped within the league's
+WAIVER_RUN_MINUTE = {  # Tue 00:MM PT per league (ADV-FF-20 observed runs)
+    "1320161122837368832": 5,   # snapusa ~12:05am Tue PT
+    "1379714328738955264": 2,   # weekend warriors ~12:02am Tue PT
+}
+
+
+def _next_tue_run_ms(after_ms, run_minute=5):
+    """First Tuesday 00:MM PT strictly after after_ms (epoch ms).
+
+    The run that lifts a game lock is the first one after the kickoff —
+    a Sunday kickoff lifts at Tue 00:MM (~38h later), a Thursday-night
+    kickoff at the following Tuesday's run.
+    """
+    dt = datetime.fromtimestamp(after_ms / 1000,
+                                tz=ZoneInfo("America/Los_Angeles"))
+    days = (1 - dt.weekday()) % 7  # weekday(): Mon=0, Tue=1
+    cand = dt.replace(hour=0, minute=run_minute, second=0,
+                      microsecond=0) + timedelta(days=days)
+    if cand.timestamp() * 1000 <= after_ms:
+        cand += timedelta(days=7)
+    return int(cand.timestamp() * 1000)
+
+
+def game_clear_ms(team, kickoffs, now_ms, run_minute=5):
+    """Next Tue run (epoch ms) after the team's kickoff, or None when no
+    game lock applies — no game that week (bye), kickoff still in the
+    future, or the run since kickoff already happened."""
+    if not team or not kickoffs:
+        return None
+    try:
+        k = int(kickoffs.get(team))
+    except (TypeError, ValueError):
+        return None
+    if not k or now_ms < k:
+        return None
+    nxt = _next_tue_run_ms(k, run_minute)
+    return nxt if now_ms < nxt else None
+
+
+def game_locked(team, kickoffs, now_ms, run_minute=5):
+    """True when a player's team has kicked off and the weekly waiver run
+    since that kickoff has not happened yet (2026-11-16 lesson: on Monday
+    evening every unowned player whose team played Sunday is waiver-locked
+    — the add files as a claim and burns priority — even when the player
+    was dropped weeks ago and the drop clock is long past. Four Monday
+    "FA NOW" adds — Hutchinson, Perine, Meyers, Fields — all went through
+    as waiver claims and burned snapusa #10 to #14). A bye-week team (no
+    kickoff row) is never locked; a kickoff in the future never locks."""
+    return game_clear_ms(team, kickoffs, now_ms, run_minute) is not None
+
+
+def acquisition_path(pid, recent_drops, waiver_clear_days=2, now_ms=None,
+                     game_kickoffs=None, team=None, run_minute=5):
+    """FA NOW vs CLAIM (ADV-FF-18): two independent locks, either one
+    means a claim. (1) Drop clock: a player dropped within the league's
     waiver_clear_days sits on waivers (claim: clears ~waiver_clear_days
-    after the drop on his own schedule — observed 2026-10-15, or at the
-    league's weekly run if past the window — and burns his priority slot);
-    anything else is an instant free-agent add with no priority cost.
-    Wesley's 9/23 ruling: price priority only when a claim is actually
-    required."""
+    after the drop on his own schedule — observed in the WW league
+    2026-10-15: Ja'Marr Chase dropped Tue ~12:59pm PT, cleared Thu
+    ~12:02pm PT, ~47h, never waiting for a weekly run; snapusa cases:
+    Chase McLaughlin dropped Wed 10/21 ~10:19am PT, added as a free
+    agent Fri 10/23 6:05pm PT; Jordan Addison dropped Sun 11/15 9:53am
+    PT, a free agent Tue 11/17 9:55am PT). (2) Game lock: an unowned
+    player whose team has kicked off stays locked until the next weekly
+    run, whatever the drop clock says — Wesley's 9/23 ruling still
+    applies: price priority only when a claim is actually required, and
+    a game lock is a claim actually required."""
     pid = str(pid)
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    if game_locked(team, game_kickoffs, now_ms, run_minute):
+        return "claim"
     try:
         days = int(waiver_clear_days or 2)
     except (TypeError, ValueError):
@@ -230,13 +290,21 @@ def clear_label(league):
     return f"clears (waiver day {dow} — unverified)"
 
 def claim_eta(fapid, recent_drops, waiver_clear_days=2, weekly_lbl="",
-              now_ms=None):
-    """Clear-time wording for a CLAIM tag. A player dropped inside the
+              now_ms=None, game_kickoffs=None, team=None, run_minute=5):
+    """Clear-time wording for a CLAIM tag. Two locks, effective clear is
+    the LATER of the two. (1) Drop clock: a player dropped inside the
     league's waiver-clear window clears ~waiver_clear_days after the drop
-    on his own schedule — NOT at the weekly run. Observed 2026-10-15:
-    Ja'Marr Chase was dropped Tue ~12:59pm PT and cleared Thu ~12:02pm PT
-    (~47h), never waiting for the Tue 10/20 weekly run (Wesley's 2-day
-    cooldown correction). Anything past the window uses the weekly-run
+    on his own schedule — NOT at the weekly run. Observed in the WW league
+    2026-10-15: Ja'Marr Chase was dropped Tue ~12:59pm PT and cleared Thu
+    ~12:02pm PT (~47h), never waiting for a weekly run (Wesley's 2-day
+    cooldown correction); snapusa: Jordan Addison dropped Sun 11/15
+    9:53am PT, a free agent Tue 11/17 9:55am PT — past the Tue 00:05 run,
+    so the drop clock, not the run, freed him. (2) Game lock: a player
+    whose team has kicked off clears at the next Tue run — if that run is
+    later than the drop expiry, the weekly-run label is the ETA (the
+    2026-11-16 case: Hutchinson's drop clock had expired Saturday, but
+    his team played Sunday, so he was still locked Monday night and only
+    cleared at the Tue run). Anything past both locks uses the weekly-run
     label, since the claim then sits for the next weekly process."""
     pid = str(fapid)
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -248,14 +316,20 @@ def claim_eta(fapid, recent_drops, waiver_clear_days=2, weekly_lbl="",
         dropped_at = int((recent_drops or {}).get(pid))
     except (TypeError, ValueError):
         dropped_at = None
+    drop_eta = None
     if dropped_at and (now_ms - dropped_at) < days * 86400 * 1000:
-        eta = datetime.fromtimestamp((dropped_at + days * 86400 * 1000)
-                                     / 1000,
-                                     tz=ZoneInfo("America/Los_Angeles"))
-        return (f"clears ~{eta.strftime('%a')} "
-                f"{eta.strftime('%I:%M%p').lower().lstrip('0')} PT "
-                f"({days}d drop cooldown)")
-    return weekly_lbl
+        drop_eta = dropped_at + days * 86400 * 1000
+    game_clear = game_clear_ms(team, game_kickoffs, now_ms, run_minute)
+    if drop_eta is None and game_clear is None:
+        return weekly_lbl
+    if game_clear is not None and (drop_eta is None
+                                   or game_clear >= drop_eta):
+        return weekly_lbl
+    eta = datetime.fromtimestamp(drop_eta / 1000,
+                                 tz=ZoneInfo("America/Los_Angeles"))
+    return (f"clears ~{eta.strftime('%a')} "
+            f"{eta.strftime('%I:%M%p').lower().lstrip('0')} PT "
+            f"({days}d drop cooldown)")
 
 def claim_is_stale(filed_date, today=None):
     """True when a still-FA pending claim is older than one full weekly
@@ -1344,9 +1418,12 @@ def main():
 
     # --- season clock: current NFL week + trade deadline -> posture ---
     try:
-        nfl_week = int((get(f"{SLEEPER}/state/nfl") or {}).get("week") or 1)
+        _nfl_state = get(f"{SLEEPER}/state/nfl") or {}
+        nfl_week = int(_nfl_state.get("week") or 1)
+        nfl_season = str(_nfl_state.get("season") or "2026")
     except Exception:
         nfl_week = 1
+        nfl_season = "2026"
     trade_dl = (league.get("settings") or {}).get("trade_deadline") or 11
     ir_slots = (league.get("settings") or {}).get("reserve_slots") or 0  # E13
     # ADV-FF-14: one canonical boundary shared with fantasy-trade-deadline-stop.
@@ -2358,10 +2435,12 @@ def main():
         print("  deep league: wire is thin — only startable FAs at thin "
               "positions matter; never drop a startable asset")
     # ADV-FF-18: every suggested ADD is labeled FA NOW (instant add, no
-    # priority cost) or CLAIM (waiver-locked: burns his slot — clears
-    # ~waiver_clear_days after a recent drop, else at the per-league
-    # weekly run) from the recent-drop timestamps — Wesley's 9/23
-    # "FA or claim?" ask. ADV-FF-20: the run time is the observed
+    # priority cost) or CLAIM (waiver-locked: burns his slot) from the
+    # recent-drop timestamps AND the game lock — a player is a claim when
+    # either lock applies: dropped within waiver_clear_days, or his team
+    # has kicked off and the next Tue run has not happened (2026-11-16:
+    # four Monday "FA NOW" adds were really claims because their teams
+    # had played Sunday). ADV-FF-20: the run time is the observed
     # per-league run (WAIVER_RUN_LABEL), not the stale Sleeper field.
     # Hoisted above the top-FA loop (2026-11-12, Pineiro lesson): the
     # top-FA lines need the same path helpers — a recently-dropped
@@ -2371,23 +2450,40 @@ def main():
     _now_ms = int(time.time() * 1000)
     _clear_lbl = clear_label(league)
     _waiver_slot = waiver_slot(rosters, a.me)
+    _run_minute = WAIVER_RUN_MINUTE.get(str(league.get("league_id") or ""), 5)
+    # Game lock (2026-11-16): an unowned player whose team has kicked off
+    # is waiver-locked until the next Tue run, whatever the drop clock
+    # says. Kickoffs come from the cached nflverse schedule; if the file
+    # is unavailable the board degrades to the drop clock alone, never a
+    # crash and never a faked schedule.
+    _kickoffs = {}
+    try:
+        _gpaths = fi.nflverse_paths(keys=["games"])
+        _kickoffs = fi.load_game_kickoffs(_gpaths["games"], nfl_season,
+                                          nfl_week)
+    except Exception:
+        _kickoffs = {}
+
+    def _team(fapid):
+        return ((players.get(str(fapid)) or {}).get("team") or "")
 
     def _path(fapid):
-        return acquisition_path(fapid, recent_drops, _clear_days, _now_ms)
+        return acquisition_path(fapid, recent_drops, _clear_days, _now_ms,
+                                _kickoffs, _team(fapid), _run_minute)
 
     def _claimtag(fapid):
         # CLAIM-only tag (top-FA mirror of _pathtag's CLAIM branch):
-        # claim_eta — a recently dropped player clears
-        # ~waiver_clear_days after the drop on his own schedule (the
-        # observed Chase case), not at the weekly run; anything past
-        # the window uses the weekly-run label. Tag only, never a
-        # veto/reselection; FA NOW players stay untagged (the default).
+        # claim_eta — the effective clear is the later of the drop-clock
+        # expiry and the next Tue run after the team's kickoff (the
+        # 2026-11-16 game-lock lesson); anything past both locks uses the
+        # weekly-run label. Tag only, never a veto/reselection; FA NOW
+        # players stay untagged (the default).
         # Semicolon, not comma, before "burns": the top-FA lines are
         # comma-joined and the pins split segments on ", " — a comma
         # inside the tag would fragment the segment (2026-11-12: the
         # first run broke the P-tag pin exactly this way).
         _eta = claim_eta(fapid, recent_drops, _clear_days, _clear_lbl,
-                         _now_ms)
+                         _now_ms, _kickoffs, _team(fapid), _run_minute)
         return f" [CLAIM — {_eta}; burns #{_waiver_slot}]"
 
     def _pathtag(path, fapid):
@@ -2502,7 +2598,8 @@ def main():
                           + (f" ({_c['notes']})" if _c["notes"] else ""))
                     continue
                 _eta = claim_eta(_cid, recent_drops, _clear_days, _clear_lbl,
-                                 _now_ms)
+                                 _now_ms, _kickoffs, _team(_cid),
+                                 _run_minute)
                 print(f"  {_c['name']} ({_c['pos']}): filed {_c['date']} — "
                       f"expected {_eta}, burns #{_waiver_slot}"
                       + (_lg if _lg else "")
