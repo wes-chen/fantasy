@@ -718,6 +718,137 @@ check("claim_eta: corrupt drop timestamp -> weekly-run label, no crash",
       tb.claim_eta("p1", {"p1": "not-a-time"}, 2, "WEEKLY", _NOW)
       == "WEEKLY")
 
+# Game lock (2026-11-19, Nov 16 lesson): an unowned player whose team has
+# kicked off is waiver-locked until the next Tue run, whatever the drop
+# clock says. Explicit ET/PT datetimes throughout — no weekday is assumed
+# from the fixed _NOW.
+def _et_ms(day, hhmm):
+    return int(datetime.strptime(f"{day} {hhmm}", "%Y-%m-%d %H:%M")
+               .replace(tzinfo=ZoneInfo("America/New_York"))
+               .timestamp() * 1000)
+
+def _pt_ms(day, hhmm):
+    return int(datetime.strptime(f"{day} {hhmm}", "%Y-%m-%d %H:%M")
+               .replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+               .timestamp() * 1000)
+
+_w10_kick = {"MIN": _et_ms("2026-11-15", "13:00"),   # MIN @ GB Sun
+             "CIN": _et_ms("2026-11-15", "20:20"),   # PIT @ CIN Sun night
+             "HOU": _et_ms("2026-11-15", "13:00"),   # HOU @ CLE Sun
+             "NYG": _et_ms("2026-11-12", "20:15")}   # WAS @ NYG Thu night
+check("game_locked: MIN Mon Nov 16 9pm PT (kicked off Sun) -> locked",
+      tb.game_locked("MIN", _w10_kick, _pt_ms("2026-11-16", "21:00"), 5))
+check("game_locked: MIN Tue Nov 17 00:04 PT (1 min before run) -> locked",
+      tb.game_locked("MIN", _w10_kick, _pt_ms("2026-11-17", "00:04"), 5))
+check("game_locked: MIN Tue Nov 17 00:05 PT (run instant) -> free",
+      not tb.game_locked("MIN", _w10_kick, _pt_ms("2026-11-17", "00:05"),
+                         5))
+check("game_locked: MIN Tue Nov 17 8am PT (run passed) -> free",
+      not tb.game_locked("MIN", _w10_kick, _pt_ms("2026-11-17", "08:00"),
+                         5))
+check("game_locked: MIN Sun Nov 15 9am PT (kickoff 10am PT) -> free",
+      not tb.game_locked("MIN", _w10_kick, _pt_ms("2026-11-15", "09:00"),
+                         5))
+check("game_locked: NYG Fri Nov 13 (Thu-night game) -> locked",
+      tb.game_locked("NYG", _w10_kick, _pt_ms("2026-11-13", "10:00"), 5))
+check("game_locked: NYG Tue Nov 17 8am PT (run passed) -> free",
+      not tb.game_locked("NYG", _w10_kick, _pt_ms("2026-11-17", "08:00"),
+                         5))
+check("game_locked: bye-week team (no kickoff row) -> free",
+      not tb.game_locked("DAL", _w10_kick, _pt_ms("2026-11-16", "21:00"),
+                         5))
+check("game_locked: empty kickoffs / no team -> free, no crash",
+      not tb.game_locked("MIN", {}, _pt_ms("2026-11-16", "21:00"), 5)
+      and not tb.game_locked(None, _w10_kick,
+                             _pt_ms("2026-11-16", "21:00"), 5)
+      and not tb.game_locked("MIN", {"MIN": "not-a-time"},
+                             _pt_ms("2026-11-16", "21:00"), 5))
+check("game_locked: WW run minute (00:02) frees 3 min before snapusa's",
+      tb.game_locked("MIN", _w10_kick, _pt_ms("2026-11-17", "00:03"), 5)
+      and not tb.game_locked("MIN", _w10_kick,
+                             _pt_ms("2026-11-17", "00:03"), 2))
+check("_next_tue_run_ms: Sun kickoff -> Tue 00:05 PT",
+      tb._next_tue_run_ms(_et_ms("2026-11-15", "13:00"), 5)
+      == _pt_ms("2026-11-17", "00:05"))
+check("_next_tue_run_ms: Thu-night kickoff -> same Tue 00:05 PT",
+      tb._next_tue_run_ms(_et_ms("2026-11-12", "20:15"), 5)
+      == _pt_ms("2026-11-17", "00:05"))
+check("acquisition_path: never dropped, game-locked -> claim",
+      tb.acquisition_path("p1", {}, 2, _pt_ms("2026-11-16", "21:00"),
+                          _w10_kick, "MIN", 5) == "claim")
+check("acquisition_path: never dropped, run passed -> fa",
+      tb.acquisition_path("p1", {}, 2, _pt_ms("2026-11-17", "08:00"),
+                          _w10_kick, "MIN", 5) == "fa")
+check("acquisition_path: dropped 10 days ago, game-locked -> claim "
+      "(drop clock alone would say fa)",
+      tb.acquisition_path("p1", {"p1": _pt_ms("2026-11-06", "12:00")},
+                          2, _pt_ms("2026-11-16", "21:00"),
+                          _w10_kick, "MIN", 5) == "claim")
+check("acquisition_path: drop-locked, bye-week team -> claim (drop lock "
+      "alone, no game lock)",
+      tb.acquisition_path("p1", {"p1": _pt_ms("2026-11-16", "20:00")},
+                          2, _pt_ms("2026-11-16", "21:00"),
+                          _w10_kick, "DAL", 5) == "claim")
+check("acquisition_path: neither lock (old drop, bye team) -> fa",
+      tb.acquisition_path("p1", {"p1": _pt_ms("2026-11-06", "12:00")},
+                          2, _pt_ms("2026-11-16", "21:00"),
+                          _w10_kick, "DAL", 5) == "fa")
+check("claim_eta: game-locked only (never dropped) -> weekly-run label",
+      tb.claim_eta("p1", {}, 2, "WEEKLY", _pt_ms("2026-11-16", "21:00"),
+                   _w10_kick, "MIN", 5) == "WEEKLY")
+check("claim_eta: both locks, drop later (Addison: dropped Sun 9:53am, "
+      "game Sun, run Tue 00:05) -> drop-cooldown ETA Tue 9:53am",
+      tb.claim_eta("p1", {"p1": _pt_ms("2026-11-15", "09:53")}, 2,
+                   "WEEKLY", _pt_ms("2026-11-16", "21:00"),
+                   _w10_kick, "MIN", 5)
+      == "clears ~Tue 9:53am PT (2d drop cooldown)")
+check("claim_eta: both locks, game later (dropped Sat, game Sun) -> "
+      "weekly-run label",
+      tb.claim_eta("p1", {"p1": _pt_ms("2026-11-14", "10:00")}, 2,
+                   "WEEKLY", _pt_ms("2026-11-15", "12:00"),
+                   _w10_kick, "MIN", 5) == "WEEKLY")
+check("claim_eta: drop clock expired, game lock binding (Hutchinson: "
+      "dropped Thu, game Sun, now Sun night) -> weekly-run label",
+      tb.claim_eta("p1", {"p1": _pt_ms("2026-11-12", "09:29")}, 2,
+                   "WEEKLY", _pt_ms("2026-11-15", "22:34"),
+                   _w10_kick, "HOU", 5) == "WEEKLY")
+check("claim_eta: drop-locked only, bye team -> drop-cooldown ETA",
+      tb.claim_eta("p1", {"p1": _pt_ms("2026-11-16", "20:00")}, 2,
+                   "WEEKLY", _pt_ms("2026-11-16", "21:00"),
+                   _w10_kick, "DAL", 5)
+      == "clears ~Wed 8:00pm PT (2d drop cooldown)")
+# Backtest (2026-11-16): the four Monday "FA NOW" adds were really
+# claims — all four went through as waiver claims and burned snapusa
+# #10 to #14. Ground truth is the live Sleeper transaction record
+# (drop timestamps verified 2026-11-19) + the real nflverse Week-10
+# kickoffs from the cached games file. SKIP when the cache is absent.
+try:
+    _gpath16 = fi.nflverse_paths(keys=["games"])["games"]
+    _w10_real = fi.load_game_kickoffs(_gpath16, "2026", 10)
+    check("game lock: loader reads Week-10 kickoffs (MIN/CIN/HOU/NYG)",
+          all(_w10_real.get(t) == _w10_kick[t] for t in _w10_kick),
+          f"got { {t: _w10_real.get(t) for t in _w10_kick} }")
+    _nov16 = _pt_ms("2026-11-16", "21:00")
+    _drops16 = {
+        "Meyers": ("13264", "CIN", _pt_ms("2026-10-10", "14:27")),
+        "Perine": ("4147", "CIN", _pt_ms("2026-11-02", "23:11")),
+        "Fields": ("13285", "NYG", _pt_ms("2026-11-09", "16:53")),
+        "Hutchinson": ("10218", "HOU", _pt_ms("2026-11-12", "09:29")),
+    }
+    for _nm16, (_pid16, _tm16, _dr16) in _drops16.items():
+        check(f"game lock backtest: {_nm16} Mon Nov 16 9pm -> claim",
+              tb.acquisition_path(_pid16, {_pid16: _dr16}, 2, _nov16,
+                                  _w10_real, _tm16, 5) == "claim")
+    # Addison, the positive control: dropped Sun 09:53, MIN game Sun, both
+    # locks lift by Tue 09:55 (run 00:05 + drop expiry 09:53) -> fa.
+    check("game lock backtest: Addison Tue Nov 17 9:55am -> fa",
+          tb.acquisition_path("9756",
+                              {"9756": _pt_ms("2026-11-15", "09:53")},
+                              2, _pt_ms("2026-11-17", "09:55"),
+                              _w10_real, "MIN", 5) == "fa")
+except Exception as _e16:  # noqa: BLE001 - guarded backtest: SKIP
+    print(f"  SKIP game-lock backtest: {_e16}")
+
 # Top-FA CLAIM tag (2026-11-12, Pineiro lesson): the CLAIM text renders
 # from exactly one helper (_claimtag) shared by the suggested-move tag
 # and the top-FA formatter — one rendering, two surfaces, so the ETA
@@ -727,6 +858,18 @@ check("top-FA CLAIM tag: single _claimtag helper wired into both "
       "surfaces (suggested-move tag + top-FA formatter)",
       _src.count("_claimtag(") >= 3,
       f"count={_src.count('_claimtag(')}")
+check("game lock: one game_clear_ms helper feeds both locks "
+      "(game_locked + claim_eta)",
+      _src.count("game_clear_ms(") == 3,
+      f"count={_src.count('game_clear_ms(')}")
+check("game lock: acquisition_path consults game_locked (drop clock "
+      "alone never decides FA NOW)",
+      _src.count("game_locked(") == 2,
+      f"count={_src.count('game_locked(')}")
+check("game lock: board loads kickoffs from the nflverse schedule "
+      "(one call site)",
+      _src.count("load_game_kickoffs") == 1,
+      f"count={_src.count('load_game_kickoffs')}")
 
 # claim_is_stale (2026-11-01): a pending claim still showing FA past one
 # full weekly waiver cycle has necessarily passed a run without clearing,
@@ -2707,6 +2850,18 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
         for _dcl in _dupcl:
             _nm2pidcl.pop(_dcl, None)
         _nowcl = int(time.time() * 1000)
+        # Game lock (2026-11-19): the recompute must use the same two
+        # locks the board does — a top-FA player whose team has kicked
+        # off is a claim even with an old drop. Kickoffs from the cached
+        # nflverse schedule for the board's own NFL week; SKIP the pin
+        # when the cache is unavailable (guarded try).
+        _wk_mcl = re.search(r"NFL Week (\d+)", out)
+        _wkcl = int(_wk_mcl.group(1)) if _wk_mcl else None
+        if _wkcl is None:
+            raise ValueError("no NFL week in board header")
+        _gpathcl = fi.nflverse_paths(keys=["games"])["games"]
+        _kickcl = fi.load_game_kickoffs(_gpathcl, "2026", _wkcl)
+        _runmincl = tb.WAIVER_RUN_MINUTE.get(league, 5)
         _badcl, _checkedcl, _skippedcl = [], 0, 0
         for _lncl in out.splitlines():
             _mtcl = re.match(r"  top FA (QB|RB|WR|TE|K|DEF): (.*)$", _lncl)
@@ -2721,8 +2876,10 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
                     _skippedcl += 1
                     continue
                 _checkedcl += 1
+                _tmcl = (_plcl.get(_pidcl) or {}).get("team") or ""
                 _want_claim = (tb.acquisition_path(
-                    _pidcl, _rdcl, _cdcl, _nowcl) == "claim")
+                    _pidcl, _rdcl, _cdcl, _nowcl, _kickcl, _tmcl,
+                    _runmincl) == "claim")
                 _has_claim = "[CLAIM — " in _segcl
                 if _want_claim != _has_claim:
                     _badcl.append(f"{_nm} want_claim={_want_claim} "
