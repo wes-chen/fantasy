@@ -14,6 +14,7 @@ assert FUNCTIONAL invariants, not just exit 0:
 
 Run: python3 tests/test_golden.py   (from the skill dir; exit != 0 on failure)
 """
+import ast
 import os
 import re
 import json
@@ -4156,6 +4157,47 @@ check("coverage: ADD QB / DROP WR closes the QB gap",
       tb.closes_coverage_gap("QB", "WR", {"QB"}) is True)
 check("coverage: ADD QB / DROP QB closes nothing",
       tb.closes_coverage_gap("QB", "QB", {"QB"}) is False)
+# Creates-gap mirror (2026-11-20): a DROP can strand a slot the audit
+# protects — the Nov 20 snapusa board printed ADD RB/TE / DROP
+# Garoppolo with no warning while dropping Wesley's only QB3. Tag
+# only, never a veto; the same helper feeds the suggested moves and
+# the E15 stash hunt (add_pos None there — the stash goes to IR).
+_bpqc, _injqc, _bsqc, _fxqc = _cg_qb(3)
+_curqc = {g["pos"] for g in fi.coverage_gaps(_bpqc, _bsqc, _fxqc, _injqc,
+                                             14, is_sf=True)}
+check("coverage: ADD RB / DROP QB3 creates the QB gap",
+      tb.creates_coverage_gap("RB", _bpqc["QB"][2], _bpqc, _bsqc, _fxqc,
+                              _injqc, 14, True, _curqc) == ["QB"])
+check("coverage: ADD QB / DROP QB3 creates nothing (cover replaced)",
+      tb.creates_coverage_gap("QB", _bpqc["QB"][2], _bpqc, _bsqc, _fxqc,
+                              _injqc, 14, True, _curqc) == [])
+check("coverage: ADD RB / DROP WR creates nothing",
+      tb.creates_coverage_gap("RB", _bpqc["WR"][0], _bpqc, _bsqc, _fxqc,
+                              _injqc, 14, True, _curqc) == [])
+check("coverage: ADD RB / DROP TE creates the TE gap (2 TEs -> 1)",
+      tb.creates_coverage_gap("RB", _bpqc["TE"][0], _bpqc, _bsqc, _fxqc,
+                              _injqc, 14, True, _curqc) == ["TE"])
+check("coverage: stash ADD (None) / DROP QB3 creates the QB gap",
+      tb.creates_coverage_gap(None, _bpqc["QB"][2], _bpqc, _bsqc, _fxqc,
+                              _injqc, 14, True, _curqc) == ["QB"])
+check("coverage: gap already present is not 'created'",
+      tb.creates_coverage_gap(
+          "RB", _bpq["QB"][1], _bpq, _bsq, _fxq, _injq, 14, True,
+          {g["pos"] for g in fi.coverage_gaps(_bpq, _bsq, _fxq, _injq,
+                                              14, is_sf=True)}) == [])
+check("coverage: 4-team league never creates a tagged gap",
+      tb.creates_coverage_gap("RB", _bpqc["QB"][2], _bpqc, _bsqc, _fxqc,
+                              _injqc, 4, True, set()) == [])
+# FLEX-POOL creation is excluded, same as the close tag: 8 eligible
+# for 8 slots, dropping a WR creates a pool gap the helper must not name.
+_bpf, _injf, _bsf, _fxf = _cg_bp(2, rb_n=3, wr_n=3)
+check("coverage: FLEX-POOL creation never takes the tag",
+      tb.creates_coverage_gap("QB", _bpf["WR"][0], _bpf, _bsf, _fxf,
+                              _injf, 14, False, set()) == [])
+check("coverage: creates_coverage_gap wired into both move surfaces "
+      "(suggested moves + stash hunt)",
+      _src.count("creates_coverage_gap(") == 3,
+      f"count={_src.count('creates_coverage_gap(')}")
 
 # ---------------- value divergence: injury veto ----------------
 # 2026-10-21: the divergence section flagged Davante Adams (Sleeper Out,
@@ -4597,6 +4639,80 @@ for _lg, _o in ((SNAPUSA, out_snap), (WW, out_ww)):
         check(f"div-pool: live {_lg} — tagged DROP is CALC HIGHER-flagged",
               _dn in _flagged,
               f"drop: {_dn} // flagged: {sorted(_flagged)}")
+
+# --- creates-gap live pin (2026-11-20) -------
+# Biconditional from the board's own roster lines: a suggested move
+# (or stash-hunt ADD/DROP) whose DROP is the marginal cover at a
+# slot — roster count == slots+1, ADD at another position — must carry
+# [CREATES <POS> COVERAGE GAP], and no move may carry a tag its
+# roster math does not justify. Slots come from the TEAM NEEDS
+# effective-slots line; team count from the header (<=6-team leagues
+# never tag — the audit is silent there). Live today: snapusa ADD
+# RB/TE / DROP Garoppolo (3 QBs for 2 slots) must tag QB; ADD QB /
+# DROP Garoppolo must not. Stash site is vacuous today (snapusa
+# watchlist-only, WW suppressed) and prints as such.
+def _roster_count_of(out, pos):
+    for ln in out.splitlines():
+        m = re.match(rf"  {pos}: (.+)$", ln)
+        if m:
+            seg = m.group(1).strip()
+            return 0 if seg == "(none rostered)" else len(seg.split(", "))
+    return None
+
+
+def _expected_creates(out, add_pos, drop_pos):
+    m = re.search(r"^LEAGUE: .+? \| (\d+) teams \|", out, re.M)
+    if m and int(m.group(1)) <= 6:
+        return set()
+    sm = re.search(r"effective slots: (\{[^}]*\})", out)
+    if not sm:
+        return None
+    try:
+        slots = ast.literal_eval(sm.group(1))
+    except (ValueError, SyntaxError):
+        return None
+    exp = set()
+    for pos, key in (("QB", "QB"), ("TE", "TE")):
+        cnt = _roster_count_of(out, pos)
+        if (cnt is not None and drop_pos == pos and add_pos != pos
+                and cnt == slots.get(key, 0) + 1):
+            exp.add(pos)
+    return exp
+
+
+def _move_positions(ln):
+    m = re.match(r"  ADD [^(]+ \((\w+)[,\)].*?/ DROP [^(]+ \((\w+)[,\)]",
+                 ln)
+    return m.groups() if m else None
+
+
+for _lg, _o in ((SNAPUSA, out_snap), (WW, out_ww)):
+    _mv = _suggested_moves_of(_o)
+    _st = [ln for ln in _o.splitlines()
+           if re.match(r"  ADD .+ / DROP .+ — IR stash", ln)]
+    if not _mv and not _st:
+        print(f"  (creates-gap live pin {_lg}: no moves — vacuous)")
+        continue
+    for _ln in _mv + _st:
+        _pp = _move_positions(_ln)
+        if _pp is None:
+            print(f"  (creates-gap live pin {_lg}: unparseable move — "
+                  f"skipping: {_ln})")
+            continue
+        _exp = _expected_creates(_o, _pp[0], _pp[1])
+        if _exp is None:
+            print(f"  (creates-gap live pin {_lg}: slots unparseable — "
+                  f"skipping)")
+            continue
+        _tagged = set(re.findall(r"\[CREATES (\w+) COVERAGE GAP\]", _ln))
+        check(f"creates-gap: live {_lg} — move tags exactly the gaps "
+              f"its DROP creates",
+              _tagged == _exp,
+              f"move: {_ln} // tagged: {sorted(_tagged)} // "
+              f"expected: {sorted(_exp)}")
+    if not _st:
+        print(f"  (creates-gap live pin {_lg}: no stash ADD/DROP — "
+              f"vacuous)")
 
 print()
 if failures:
