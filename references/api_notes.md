@@ -484,6 +484,17 @@ add that closes it is tagged `[closes QB coverage gap]` via the same
 Cousins trade on (Dak + Jones only, no QB3); skipped in wire-rich
 (<=6-team) leagues like the rest of the audit.
 
+The mirror (2026-11-20): `tb.creates_coverage_gap()` recomputes
+`fi.coverage_gaps()` on the post-move roster (drop removed, add
+inserted; add_pos None for an E15 stash ADD, which goes to IR and adds
+no active cover) and returns the TE/QB gaps that were not already
+present — FLEX-POOL excluded, same as the close tag. A suggested move
+or stash ADD/DROP carrying a new gap is tagged `[CREATES <POS>
+COVERAGE GAP]` (tag only, never a veto). The live case: the Nov 20
+snapusa board printed ADD RB/TE / DROP Jimmy Garoppolo — dropping
+Wesley's only QB3 (3 QBs for 2 slots) — with no warning, while ADD QB
+/ DROP Garoppolo keeps 3 QBs and creates nothing.
+
 ## Partner-fit mirror on 1-for-1 swaps (2026-11-13)
 
 The old 1-for-1 gate was the coarse `need_score` thinness flag: the
