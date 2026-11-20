@@ -33,7 +33,11 @@ QB is the same audit — no QB3 behind the QB + SUPER_FLEX slots means a
 QB scratch drops SUPER_FLEX to a flex player; the line carries
 `[EXPOSED: <designation>]` when the lone starter (or a QB starter) is
 Questionable or worse, and a waiver suggestion that closes a gap is tagged
-`[closes TE coverage gap]` or `[closes QB coverage gap]`), a 4-week bye-crater forecast (G9 —
+`[closes TE coverage gap]` or `[closes QB coverage gap]`; the mirror — a
+suggested move or IR-stash ADD/DROP whose DROP strands a covered slot
+(drop the only QB3 for a RB/TE, 2026-11-20) — is tagged `[CREATES <POS>
+COVERAGE GAP]` (tag only, never a veto; the E15 stash ADD goes to IR,
+so it adds no active cover), a 4-week bye-crater forecast (G9 —
 2+ projected starters on the same bye flagged), a value-divergence
 section (FantasyPros rest-of-season ECR rank vs FantasyCalc rank — validated ROS feed only, never draft ranks (gh #24); |diff|
 >= 12 spots flagged as hold/buy-low or sell-high; players flagged Out/IR/Doubtful/Suspended are excluded with a count — the two feeds reprice the same injury news on different schedules, so a divergence there is a staleness artifact, not a signal (the 2026-10-21 Adams case; same veto as G1 #28); flagged
