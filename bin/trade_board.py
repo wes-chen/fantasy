@@ -593,6 +593,35 @@ def closes_coverage_gap(pos, drop_pos, gap_poses):
     return pos in gap_poses and pos != "FLEX-POOL" and drop_pos != pos
 
 
+def creates_coverage_gap(add_pos, drop, bypos, base_slots, flex_slots,
+                         injury_of, num_teams, is_sf, cur_gap_poses):
+    """Positions whose coverage gap a waiver move would CREATE.
+
+    The mirror of closes_coverage_gap: a DROP can strand a slot the
+    audit exists to protect. Recompute fi.coverage_gaps() on the
+    post-move roster (drop removed, add inserted — add_pos None when
+    the ADD goes to IR, as in the E15 stash hunt, so it adds no active
+    cover) and return the TE/QB gaps that were not already present,
+    sorted for a stable tag order. FLEX-POOL is excluded, same as the
+    close tag: a pool gap is a depth problem, not a slot a single move
+    creates or closes. 4-team leagues return [] — coverage_gaps() is
+    silent there. The live case (2026-11-20): ADD RB/TE / DROP Jimmy
+    Garoppolo drops Wesley's only QB3 in Superflex while the board
+    prints no warning; ADD QB / DROP Garoppolo keeps 3 QBs and
+    creates nothing.
+    """
+    hypo = {p: [x for x in lst if x["id"] != drop["id"]]
+            for p, lst in bypos.items()}
+    if add_pos is not None:
+        hypo.setdefault(add_pos, []).append(
+            {"id": "__new__", "name": "", "pos": add_pos, "val": 0})
+    new_gaps = fi.coverage_gaps(hypo, base_slots, flex_slots, injury_of,
+                                num_teams, is_sf=is_sf)
+    return sorted({g["pos"] for g in new_gaps
+                   if g["pos"] in ("TE", "QB")}
+                  - set(cur_gap_poses or ()))
+
+
 def ir_capacity(reserve_slots, reserve_count):
     """IR-slot accounting (E13): returns (slots, open).
 
@@ -2820,10 +2849,18 @@ def main():
                            if closes_coverage_gap(pos, b["pos"],
                                                   _cov_gap_poses)
                            else "")
+                # Creates-gap mirror (2026-11-20): the DROP can strand
+                # a slot the audit protects — tag only, never a veto.
+                # The persona decides, but it must see the cost.
+                _creates = creates_coverage_gap(
+                    pos, b, me["bypos"], base_slots, flex_slots,
+                    _inj_of, num_teams, is_sf, _cov_gap_poses)
+                _creates_tag = "".join(
+                    f" [CREATES {p} COVERAGE GAP]" for p in _creates)
                 _ln = (f"  ADD {fan} ({pos},{fstr(fapid, fav)})"
                        f"{ptag_of(fapid)} / "
                        f"DROP {b['name']} ({b['pos']},{b['val']})"
-                       + _pathtag(_p, fapid) + _closes
+                       + _pathtag(_p, fapid) + _closes + _creates_tag
                        + on_bye_this_week_tag(
                            fp.get(fapid, (None, None, None))[0], nfl_week)
                        + div_adjust_tag(b))
@@ -2989,9 +3026,17 @@ def main():
                       + _pathtag(_sp, _c["sid"]))
             elif _drop_pool:
                 _dp = _drop_pool[0]
+                # Same creates-gap mirror as the suggested moves: the
+                # stash ADD goes to IR, so it adds no active cover —
+                # add_pos None. (2026-11-20)
+                _creates = creates_coverage_gap(
+                    None, _dp, me["bypos"], base_slots, flex_slots,
+                    _inj_of, num_teams, is_sf, _cov_gap_poses)
+                _creates_tag = "".join(
+                    f" [CREATES {p} COVERAGE GAP]" for p in _creates)
                 print(f"  ADD {_c['name']} ({_c['pos']}) / "
                       f"DROP {_dp['name']} ({_dp['pos']},{_dp['val']})"
-                      f"{div_adjust_tag(_dp)} — "
+                      f"{div_adjust_tag(_dp)}{_creates_tag} — "
                       f"IR stash, move to IR on add" + _pathtag(_sp, _c["sid"]))
             else:
                 print("  (no droppable bench — no stash move)")
