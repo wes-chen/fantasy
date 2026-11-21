@@ -595,3 +595,47 @@ protected exclusion still wins), tag checks, source-count pins (helper
 call sites == 2, tag call sites == 3), and a live pin that any tagged
 DROP names a CALC HIGHER-flagged player (vacuous Nov 18 — no flagged
 player is a chosen DROP on either board).
+
+## Protected holds (2026-11-21)
+
+Wesley said Nov 18 to hold Jimmy Garoppolo — the Patriots were exploring
+QBs during their bye (Maye out, Garoppolo played for McDaniels), a lottery
+ticket, not a drop — and the Nov 20 board still suggested dropping him
+twice (ADD Drew Lock / ADD Kaleb Johnson, both DROP Garoppolo), because no
+registry recorded the correction. The chat-driven registries already
+covered claims, plans, and offers; holds are the fourth: a standing
+instruction about a player, not a transaction.
+
+`protected_holds.md` (LOCAL-ONLY, never pushed — same as the other three
+registries) carries one row per hold: `player_id | name | pos | date |
+status | league | reason`, status `hold` (any other status is resolved
+history). `tb.load_protected_holds(path, league=None)` mirrors
+`load_pending_claims` exactly (per-league scoping, gh #26 logic; legacy
+rows with no league column apply in every league; missing file -> {}).
+
+Wiring: the hold ids join the G8 protected set (`_prot |= set(holds)`,
+next to the on-block union), so `waiver_drop_pool()` excludes them from
+the suggested moves and the IR stash hunt's ADD/DROP line — the same set
+already fed both — and the clog audit call passes
+`onblock=set(onblock) | set(holds)`, so a held player never reaches DROP
+CANDIDATES; his clog line carries a `[hold]` tag. A `=== PROTECTED
+HOLDS ===` section prints each open hold with its live status (HOLDING —
+on his roster / GONE — no longer on any roster, or now on another
+manager's roster — resolve the row), so the Tuesday worker can see why
+the usual val-0 drop is gone. Holds gate waiver drops only, never
+trades: a held player can still appear in a swap row — in practice a
+val-0 bench player never cracks a partner's lineup, so no swap row names
+him, but the hold itself is not a trade veto.
+
+Live effect, Nov 21: with Garoppolo held, the snapusa board prints no
+suggested moves at all — the next-cheapest droppable bench (McGowan,
+245, Out) costs more than the top FAs (Lock 135, Johnson 44), so the
+churn gate kills them. That is the hold working as instructed, not a
+regression: the engine may not fund an add with a player Wesley said to
+keep. Golden tests: loader unit checks (parse / released ignored /
+per-league / legacy / missing file), source-count pins (loader def + one
+call site, `_prot` union, clog-audit union), live pins per league
+(section renders, no suggested DROP, `[hold]` clog tag, never in DROP
+CANDIDATES, ww silent on a snapusa-scoped row), and a fixture-swap that
+holds the live DROP CANDIDATE and asserts he leaves DROP CANDIDATES and
+renders HOLDING, then restores the registry byte-identical.
