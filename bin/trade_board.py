@@ -839,6 +839,46 @@ def load_planned_moves(path, league=None):
     return plans
 
 
+def load_protected_holds(path, league=None):
+    """Wesley's protected holds: players he explicitly said to hold, never
+    name as a waiver DROP. Returns {player_id: info} for status=hold rows.
+    Chat-driven write path like pending_claims.md: the engine never edits
+    the registry; chat marks rows resolved when Wesley releases the hold
+    or the player leaves the roster. (2026-11-21: Wesley said Nov 18 to
+    hold Garoppolo — Patriots-pickup lottery ticket — and the Nov 20
+    board still suggested dropping him twice, because no registry
+    recorded the correction.)
+
+    league: short tag ("snapusa"/"ww") scoping per league (gh #26 logic,
+    same as pending claims/offers). A row carrying a league tag applies
+    only in that league; legacy rows with no league column apply in
+    every league."""
+    holds = {}
+    try:
+        fh = open(path)
+    except FileNotFoundError:
+        return holds
+    for line in fh:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 5 or parts[4].lower() != "hold":
+            continue
+        if len(parts) >= 7 and parts[5].lower() in ("snapusa", "ww"):
+            row_league = parts[5].lower()
+            reason = "|".join(parts[6:]).strip()
+        else:
+            row_league = None
+            reason = "|".join(parts[5:]).strip()
+        if league is not None and row_league is not None and row_league != league:
+            continue
+        holds[parts[0]] = {"name": parts[1], "pos": parts[2],
+                           "date": parts[3], "league": row_league,
+                           "reason": reason}
+    return holds
+
+
 def plan_status(add_pid, plan, my_ids, owner_of, my_rid, rid2name):
     """Classify an open plan against live rosters. Returns (state, extra):
     ("executed", None) — the ADD is on his roster (the move happened; chat
@@ -1584,6 +1624,13 @@ def main():
     plans_path = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "planned_moves.md"))
     plans = load_planned_moves(plans_path, league_tag(a.league))
+    # --- Wesley's protected holds (chat-driven protected_holds.md): a
+    # player he explicitly said to hold is never named as a waiver DROP,
+    # in the suggested moves or the G8 clog audit's DROP CANDIDATES.
+    # Holds gate waiver drops only, never trades (see the loader docstring).
+    holds_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "protected_holds.md"))
+    holds = load_protected_holds(holds_path, league_tag(a.league))
 
     def pname(pid):
         # #29: DEFs render as "San Francisco 49ers DEF", not a bare "SF"
@@ -2669,6 +2716,30 @@ def main():
                   + (f" ({_p['notes']})" if _p["notes"] else ""))
         print()
 
+    # Wesley's protected holds (chat-driven protected_holds.md). A held
+    # player is never named as a waiver DROP — the G8 protected set
+    # below already excludes him from the drop pool and DROP CANDIDATES.
+    # The section prints the live status so chat can settle the row when
+    # the hold is released or the player leaves the roster (the board
+    # never edits the registry itself).
+    if holds:
+        print("=== PROTECTED HOLDS (your stated holds — never named as a waiver DROP) ===")
+        for _hid, _h in holds.items():
+            _howner = owner_of.get(str(_hid))
+            _hlg = f" [{_h['league']}]" if _h["league"] else ""
+            if _howner is None:
+                _hst = "GONE — no longer on any roster (resolve the registry row)"
+            elif str(_howner) == str(my_rid):
+                _hst = "HOLDING — on your roster"
+            else:
+                _hst = (f"GONE — now on "
+                        f"{rid2name.get(int(_howner), '?')}'s roster "
+                        f"(resolve the registry row)")
+            print(f"  {_h['name']} ({_h['pos']}): held since {_h['date']} — {_hst}"
+                  + (_hlg if _hlg else "")
+                  + (f" ({_h['reason']})" if _h["reason"] else ""))
+        print()
+
     # E14 follow-up: slot math must be known BEFORE suggestions emit — on a
     # FULL roster the DROP must be an active player, since dropping an
     # IR/reserve occupant frees no active bench slot.
@@ -2697,6 +2768,10 @@ def main():
         _prot |= {str(s) for s in buy_low_sids}
         _prot |= {str(s) for s in recent_sids}
         _prot |= {str(s) for s in onblock}
+        # 2026-11-21: a held player (chat-driven protected_holds.md) is
+        # never a waiver DROP — same protection as on-block, same set,
+        # so the suggested moves and the clog audit below still agree.
+        _prot |= set(holds)
     except Exception:  # noqa: BLE001 — degrade to the old legal-only pool
         _prot = set()
     # 2026-11-15: a duplicate K/DEF is the cheapest drop on the roster,
@@ -2915,12 +2990,14 @@ def main():
         _ranked, _drops = fi.clog_audit(
             _ball, handcuff_of=_hcuff, ahead_out=_ahead,
             rising={s: True for s in (buy_low_sids | recent_sids)},
-            onblock=set(onblock), droppable_unpriced=_dup_kdef)
+            onblock=set(onblock) | set(holds),
+            droppable_unpriced=_dup_kdef)
         for _r in _ranked[:6]:
             _tags = ("[handcuff]" if _r["sid"] in _hcuff else "") + \
                     ("[ahead-out]" if _r["sid"] in _ahead else "") + \
                     ("[rising]" if _r["sid"] in buy_low_sids else "") + \
-                    ("[recent-role]" if _r["sid"] in recent_sids else "")
+                    ("[recent-role]" if _r["sid"] in recent_sids else "") + \
+                    ("[hold]" if _r["sid"] in holds else "")
             # 2026-11-07: clog lines carry the same [!STATUS] tag as
             # the roster / radar lines — the ranked dicts already carry
             # each player's designation in "inj". Tag only, never a
