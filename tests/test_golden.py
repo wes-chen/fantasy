@@ -420,6 +420,45 @@ check("pending claims: legacy row (no league column) applies everywhere",
 check("pending claims: missing file -> empty, no crash",
       tb.load_pending_claims("/nonexistent/path.md") == {})
 
+# ---------------- protected holds registry (Garoppolo 2026-11-18 lesson) ----
+# Wesley said Nov 18 to hold Garoppolo (Patriots-pickup lottery ticket) and
+# the Nov 20 board still suggested dropping him twice — no registry recorded
+# the correction. A hold is a standing instruction: never name the player
+# as a waiver DROP, in the suggested moves or the G8 DROP CANDIDATES.
+with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+    fh.write("# comment\n\n")
+    fh.write("1837 | Jimmy Garoppolo | QB | 2026-11-18 | hold | snapusa | x\n")
+    fh.write("999 | Other League | RB | 2026-11-18 | hold | ww | y\n")
+    fh.write("777 | Released One | TE | 2026-10-10 | released | snapusa | z\n")
+    fh.write("666 | Legacy Row | QB | 2026-11-11 | hold | old note\n")
+    htmp = fh.name
+h_all = tb.load_protected_holds(htmp)
+h_snap = tb.load_protected_holds(htmp, "snapusa")
+h_ww = tb.load_protected_holds(htmp, "ww")
+os.unlink(htmp)
+check("protected holds: hold parsed, released ignored",
+      set(h_all) == {"1837", "999", "666"}
+      and h_all["1837"]["name"] == "Jimmy Garoppolo"
+      and h_all["1837"]["pos"] == "QB"
+      and h_all["1837"]["date"] == "2026-11-18"
+      and h_all["1837"]["league"] == "snapusa"
+      and h_all["1837"]["reason"] == "x", f"got {h_all}")
+check("protected holds: per-league scoping (snapusa sees snapusa + legacy)",
+      set(h_snap) == {"1837", "666"}, f"got {set(h_snap)}")
+check("protected holds: per-league scoping (ww sees ww + legacy)",
+      set(h_ww) == {"999", "666"}, f"got {set(h_ww)}")
+check("protected holds: legacy row (no league column) applies everywhere",
+      h_snap["666"]["league"] is None and h_ww["666"]["league"] is None)
+check("protected holds: missing file -> empty, no crash",
+      tb.load_protected_holds("/nonexistent/path.md") == {})
+check("protected holds: loader defined + exactly one call site in main",
+      _src.count("load_protected_holds(") == 2,
+      f"count={_src.count('load_protected_holds(')}")
+check("protected holds: holds join the G8 protected set (drop pool)",
+      "_prot |= set(holds)" in _src)
+check("protected holds: clog audit excludes holds from DROP CANDIDATES",
+      "onblock=set(onblock) | set(holds)" in _src)
+
 _owner = {"1": "10", "2": "11"}
 _r2n = {10: "wesley", 11: "rival"}
 check("claim_resolution: on his roster -> cleared",
@@ -3334,16 +3373,17 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           all("UNPROTECTED" in ln for ln in _freelines),
           f"unflagged: {[ln for ln in _freelines if 'UNPROTECTED' not in ln]}")
     # G8: rows carry contingent values, and every rendered tag names one
-    # of the four contingencies (handcuff / hurt-ahead / rising /
-    # recent-role). The vocabulary is pinned so a misspelled or unnamed
-    # tag can't drift in silently; a deliberate new contingency (like the
-    # 2026-10-19 last-game role shield) moves the pin with it.
+    # of the five contingencies (handcuff / hurt-ahead / rising /
+    # recent-role / hold). The vocabulary is pinned so a misspelled or
+    # unnamed tag can't drift in silently; a deliberate new contingency
+    # (like the 2026-10-19 last-game role shield) moves the pin with it.
     _g8sec = out.split("roster-clog audit (G8")[1].split("===")[0]
     check(f"{tag}: G8 rows rank by contingent value",
           re.search(r" -> contingent [\d.]+\)", _g8sec) is not None)
     _g8tags = set(re.findall(r"\[[a-z-]+\]", _g8sec))
     check(f"{tag}: G8 contingency tags use the named vocabulary",
-          _g8tags <= {"[handcuff]", "[ahead-out]", "[rising]", "[recent-role]"},
+          _g8tags <= {"[handcuff]", "[ahead-out]", "[rising]", "[recent-role]",
+                      "[hold]"},
           f"tags: {_g8tags}")
     check(f"{tag}: G3 trending velocity line",
           "trending velocity (Sleeper-wide adds" in out)
@@ -3703,6 +3743,134 @@ finally:
 _push_src = open(os.path.join(SKILL, "bin", "push_to_github.py")).read()
 check("pending claims: registry is local-only, never in the push file set",
       "pending_claims" not in _push_src)
+
+# ---------------- protected holds: live registry + fixture-swap ------------
+# Expectations derive from the live registry: the Garoppolo row (snapusa,
+# 2026-11-18) is the standing correction — the board must print the
+# section, never name him as a suggested DROP, never list him in DROP
+# CANDIDATES, and tag his clog line [hold]. The ww board sees no holds
+# (row is snapusa-scoped), so it must print no section.
+_holds_snap = tb.load_protected_holds(
+    os.path.join(SKILL, "protected_holds.md"), "snapusa")
+_holds_ww = tb.load_protected_holds(
+    os.path.join(SKILL, "protected_holds.md"), "ww")
+check("protected holds: registry is local-only, never in the push file set",
+      "protected_holds" not in _push_src)
+_holds_out = run_board(SNAPUSA).stdout
+if _holds_snap:
+    check("protected holds: PROTECTED HOLDS section renders (snapusa)",
+          "=== PROTECTED HOLDS (your stated holds" in _holds_out)
+    for _hid, _h in _holds_snap.items():
+        check(f"protected holds: {_h['name']} listed in the section",
+              _h["name"] in _holds_out)
+        _hmoves = _suggested_moves_of(_holds_out)
+        if _hmoves:
+            check(f"protected holds: no suggested move drops {_h['name']}",
+                  not any(re.search(rf"/ DROP {re.escape(_h['name'])} \(",
+                                    ln) for ln in _hmoves),
+                  f"moves={_hmoves}")
+        else:
+            print(f"  (protected holds live pin: no suggested moves — "
+                  f"DROP exclusion vacuous)")
+        _hclog = (_holds_out.split("roster-clog audit")[1].split(
+            "=== WAIVER PRIORITY COST ===")[0]
+            if "roster-clog audit" in _holds_out else "")
+        _hline = next((ln for ln in _hclog.splitlines()
+                       if _h["name"] in ln), None)
+        check(f"protected holds: {_h['name']} clog line carries [hold]",
+              _hline is not None and "[hold]" in _hline,
+              f"line={_hline}")
+        _hdrop = next((ln for ln in _hclog.splitlines()
+                       if ln.strip().startswith("DROP CANDIDATES:")), None)
+        check(f"protected holds: {_h['name']} never in DROP CANDIDATES",
+              _hdrop is None or _h["name"] not in _hdrop,
+              f"line={_hdrop}")
+else:
+    check("protected holds: empty registry -> no PROTECTED HOLDS section",
+          "=== PROTECTED HOLDS" not in _holds_out)
+_holds_ww_out = run_board(WW).stdout
+if _holds_ww:
+    check("protected holds: ww board lists only ww-scoped holds",
+          "=== PROTECTED HOLDS (your stated holds" in _holds_ww_out
+          and all(_h["name"] in _holds_ww_out
+                  for _h in _holds_ww.values()))
+else:
+    check("protected holds: ww board prints no section (snapusa-scoped row)",
+          "=== PROTECTED HOLDS" not in _holds_ww_out,
+          "a snapusa hold must not leak onto the ww board")
+# Fixture-swap: hold the live DROP CANDIDATE (derived from a pass-1 board,
+# not hardcoded — the candidate moves as values move), run the board,
+# assert he leaves DROP CANDIDATES, gains [hold] on his clog line, and
+# renders HOLDING in the section; then restore byte-identical. This pins
+# the loader -> G8-set -> clog-audit wiring end-to-end for a player other
+# than the seeded Garoppolo row.
+_holds_file = os.path.join(SKILL, "protected_holds.md")
+_holds_orig = (open(_holds_file).read()
+               if os.path.exists(_holds_file) else None)
+try:
+    _pass1 = run_board(SNAPUSA).stdout
+    _clog1 = (_pass1.split("roster-clog audit")[1].split(
+        "=== WAIVER PRIORITY COST ===")[0]
+        if "roster-clog audit" in _pass1 else "")
+    _dc1 = next((ln for ln in _clog1.splitlines()
+                 if ln.strip().startswith("DROP CANDIDATES:")), None)
+    _dc_names = ([n.strip() for n in
+                  _dc1.split("DROP CANDIDATES:", 1)[1].split(",")]
+                 if _dc1 else [])
+    _dc_names = [re.sub(r"\[!.*?\]", "", n).strip() for n in _dc_names]
+    if not _dc_names:
+        print("  (protected holds fixture: no DROP CANDIDATES — vacuous)")
+    else:
+        _pdb = json.load(open(os.path.expanduser(
+            "~/workspace/sleeper/players.json")))
+        _name2pid = {p.get("full_name"): pid for pid, p in _pdb.items()
+                     if isinstance(p, dict) and p.get("full_name")}
+        _target_name = _dc_names[0]
+        _target_pid = _name2pid.get(_target_name)
+        if _target_pid is None:
+            print(f"  (protected holds fixture: {_target_name} has no "
+                  f"player id — skipping)")
+        else:
+            _target_pos = (_pdb.get(str(_target_pid)) or {}).get(
+                "position") or "?"
+            _fx_today = datetime.now(
+                ZoneInfo("America/Los_Angeles")).date().isoformat()
+            open(_holds_file, "w").write(
+                "# fixture — hold the live DROP CANDIDATE, restored "
+                "after the run\n\n"
+                f"{_target_pid} | {_target_name} | {_target_pos} | "
+                f"{_fx_today} | hold | snapusa | fixture hold\n")
+            _fx_out = run_board(SNAPUSA).stdout
+            check("protected holds fixture: section renders HOLDING",
+                  "=== PROTECTED HOLDS (your stated holds" in _fx_out
+                  and f"{_target_name} (" in _fx_out
+                  and "HOLDING — on your roster" in _fx_out)
+            _clog_fx = (_fx_out.split("roster-clog audit")[1].split(
+                "=== WAIVER PRIORITY COST ===")[0]
+                if "roster-clog audit" in _fx_out else "")
+            _dc_fx = next((ln for ln in _clog_fx.splitlines()
+                           if ln.strip().startswith("DROP CANDIDATES:")),
+                          None)
+            check("protected holds fixture: held player leaves "
+                  "DROP CANDIDATES",
+                  _dc_fx is None or _target_name not in _dc_fx,
+                  f"line={_dc_fx}")
+            _fline = next((ln for ln in _clog_fx.splitlines()
+                           if _target_name in ln), None)
+            check("protected holds fixture: held player's clog line "
+                  "carries [hold]",
+                  _fline is not None and "[hold]" in _fline,
+                  f"line={_fline}")
+finally:
+    if _holds_orig is None:
+        if os.path.exists(_holds_file):
+            os.unlink(_holds_file)
+    else:
+        with open(_holds_file, "w") as fh:
+            fh.write(_holds_orig)
+    check("protected holds fixture: registry restored byte-identical",
+          (_holds_orig is None and not os.path.exists(_holds_file))
+          or open(_holds_file).read() == _holds_orig)
 
 # ---------------- planned moves: empty registry -> silent ----------------
 _pm_empty = tb.load_planned_moves(os.path.join(SKILL, "planned_moves.md"))
