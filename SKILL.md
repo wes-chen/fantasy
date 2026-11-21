@@ -173,10 +173,16 @@ e.g. "ADD Sadiq / DROP McLaughlin if Judkins active"; each open plan prints
 with its live status — OPEN / EXECUTED / FAILED / STALE — and a suggested
 move that deviates from a plan (same ADD, different DROP) carries a
 PLAN NOTE naming both drops — the engine never silently switches a planned
-drop, the Oct 16-18 Sadiq lesson),
+drop, the Oct 16-18 Sadiq lesson), a `=== PROTECTED HOLDS ===` section
+(chat-driven `protected_holds.md` registry — Rumi adds a row when Wesley
+says to hold a player, e.g. "don't drop Garoppolo"; a held player is never
+named as a waiver DROP, in the suggested moves or the G8 audit's DROP
+CANDIDATES, and carries a `[hold]` tag on clog lines — the Nov 18
+Garoppolo correction, which the Nov 20 board kept violating because no
+registry recorded it; holds gate waiver drops only, never trades),
 and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, last-game-role players (see
-G1 above), and unpriced players (K/DEF,
+G1 above), held players (see PROTECTED HOLDS above), and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
 named as drops — with one exception (2026-11-15): a DUPLICATE K/DEF
 behind a healthy, non-bye keeper (best FantasyPros ROS rank at the
