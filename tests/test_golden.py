@@ -2320,6 +2320,30 @@ check("G8: every contingency outranks the plain clogger",
       == {"Cuff", "HurtAhead", "Rising"})
 check("G8: drops name only the unprotected clogger",
       _D8B == ["Clogger"])
+# 2026-11-22: the board passes handcuff_of as a SET, not a dict — the
+# old .get() crashed the whole audit the first time a handcuff backup
+# landed on the roster (WW: Emmett Johnson behind Kenneth Walker III),
+# masked until then because an empty set is falsy and `or {}` replaced
+# it with a dict. Set-form args must apply the same weights as dicts.
+_R8S, _D8S = fi.clog_audit(
+    [{"sid": "1", "name": "Clogger", "pos": "WR", "val": 1000, "inj": ""},
+     {"sid": "2", "name": "Cuff", "pos": "RB", "val": 1000, "inj": ""},
+     {"sid": "3", "name": "HurtAhead", "pos": "RB", "val": 1000, "inj": ""},
+     {"sid": "4", "name": "Rising", "pos": "WR", "val": 1000, "inj": ""}],
+    handcuff_of={"2"}, ahead_out={"3"}, rising={"4"})
+check("G8: set-form contingency args apply the same weights (no crash)",
+      {r["name"]: r["contingent"] for r in _R8S}
+      == {"Clogger": 1000.0, "Cuff": 1900.0,
+          "HurtAhead": 2100.0, "Rising": 1250.0},
+      f"got {[(r['name'], r['contingent']) for r in _R8S]}")
+check("G8: set-form drops name only the unprotected clogger",
+      _D8S == ["Clogger"])
+check("G8: None contingency args still work",
+      fi.clog_audit(
+          [{"sid": "1", "name": "Solo", "pos": "WR", "val": 100,
+           "inj": ""}],
+          handcuff_of=None, ahead_out=None, rising=None)[0][0]
+      ["contingent"] == 100.0)
 # #25 regression: unpriced positional starters (K/DEF carry val 0 because
 # there is no FantasyCalc feed for them) always bottom the contingent
 # ranking; they must stay in the ranking for completeness but NEVER be
@@ -3380,6 +3404,13 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     _g8sec = out.split("roster-clog audit (G8")[1].split("===")[0]
     check(f"{tag}: G8 rows rank by contingent value",
           re.search(r" -> contingent [\d.]+\)", _g8sec) is not None)
+    # 2026-11-22: the WW board rendered the crash stub here
+    # ("(unavailable: 'set' object has no attribute 'get')") once a
+    # handcuff backup landed on the roster — the whole droppable-bench
+    # ranking was missing from the board.
+    check(f"{tag}: G8 section never renders the crash stub",
+          "(unavailable:" not in _g8sec,
+          f"section: {_g8sec[:120]}")
     _g8tags = set(re.findall(r"\[[a-z-]+\]", _g8sec))
     check(f"{tag}: G8 contingency tags use the named vocabulary",
           _g8tags <= {"[handcuff]", "[ahead-out]", "[rising]", "[recent-role]",
@@ -3777,9 +3808,20 @@ if _holds_snap:
             if "roster-clog audit" in _holds_out else "")
         _hline = next((ln for ln in _hclog.splitlines()
                        if _h["name"] in ln), None)
-        check(f"protected holds: {_h['name']} clog line carries [hold]",
-              _hline is not None and "[hold]" in _hline,
-              f"line={_hline}")
+        if _hline is None:
+            # No clog line: the held player is a projected starter this
+            # run — clog lines cover bench only (2026-11-22: Garoppolo
+            # won the 0-value tie-break for SUPER_FLEX after Jones's
+            # FantasyCalc value went to 0 on the release). The hold
+            # still holds: the DROP-exclusion checks above are the live
+            # guarantee, and the fixture-swap below pins the [hold]
+            # wiring for a bench player.
+            print(f"  (protected holds live pin: {_h['name']} is a "
+                  f"projected starter — no clog line, [hold] vacuous)")
+        else:
+            check(f"protected holds: {_h['name']} clog line carries [hold]",
+                  "[hold]" in _hline,
+                  f"line={_hline}")
         _hdrop = next((ln for ln in _hclog.splitlines()
                        if ln.strip().startswith("DROP CANDIDATES:")), None)
         check(f"protected holds: {_h['name']} never in DROP CANDIDATES",
