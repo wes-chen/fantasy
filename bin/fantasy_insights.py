@@ -1213,12 +1213,19 @@ def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
                onblock=None, droppable_unpriced=None):
     """Rank the bench by contingent value (lowest = most droppable).
 
-    bench: [{sid, name, pos, val, inj}]. handcuff_of: {sid: True} if the
-    player is the direct backup to one of MY starters (G6). ahead_out:
-    {sid: True} if the starter ahead of him is Out/IR (he'd start).
-    rising: {sid: True} if usage is climbing (G1 buy-low). onblock: set of
-    sids with open offers (never named as drops).
+    bench: [{sid, name, pos, val, inj}]. handcuff_of: {sid: True} (or a
+    set of sids) if the player is the direct backup to one of MY starters
+    (G6). ahead_out: {sid: True} (or a set of sids) if the starter ahead
+    of him is Out/IR (he'd start). rising: {sid: True} (or a set of sids)
+    if usage is climbing (G1 buy-low). onblock: set of sids with open
+    offers (never named as drops).
     contingent = val * (1 + 0.9*handcuff + 1.1*ahead_out + 0.25*rising).
+    Membership tests (not .get()) so a set-form argument works — the
+    board passes handcuff_of as a set, and the old .get() crashed the
+    whole audit the first time a handcuff backup landed on the roster
+    (2026-11-22 WW: Emmett Johnson behind Kenneth Walker III), hidden
+    until then because an empty set is falsy and the `or {}` guard
+    silently replaced it with a dict.
     Returns (ranked, drops): ranked asc by contingent value; drops = the
     bottom names that are safe to name (priced, not on-block, not IR-stashed).
     Unpriced players (no value feed — e.g. K/DEF at val 0) stay in the
@@ -1240,9 +1247,11 @@ def clog_audit(bench, handcuff_of=None, ahead_out=None, rising=None,
     ranked = []
     for b in bench:
         sid = str(b["sid"])
-        mult = (1.0 + 0.9 * bool(handcuff_of.get(sid))
-                + 1.1 * bool(ahead_out.get(sid))
-                + 0.25 * bool(rising.get(sid)))
+        # Membership, not .get(): the contingency args arrive as dicts
+        # from the tests and as a set (handcuff_of) from the board.
+        mult = (1.0 + 0.9 * (sid in handcuff_of)
+                + 1.1 * (sid in ahead_out)
+                + 0.25 * (sid in rising))
         ranked.append(dict(b, contingent=round(b.get("val", 0) * mult, 1),
                            blocked=sid in onblock))
     ranked.sort(key=lambda d: d["contingent"])
