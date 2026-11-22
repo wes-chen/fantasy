@@ -302,6 +302,24 @@ change, snapusa suggests ADD Estime / Harrison Jr. / Higbee, all
 DROP McLaughlin, and DROP CANDIDATES names him; WW (single K, single
 DEF) is unchanged.
 
+### G8 clog audit: set-form contingency args (2026-11-22)
+
+`clog_audit()` documented its contingency args as `{sid: True}` dicts
+but read them with `.get()` — and the board passes `handcuff_of` as a
+set. The `or {}` guard masked it only while the set was empty; the
+first time a handcuff backup landed on the roster (WW: Emmett Johnson
+behind Kenneth Walker III, added Nov 20), the whole G8 section crashed
+with `'set' object has no attribute 'get'` and the board printed
+`(unavailable: ...)` instead of the droppable-bench ranking and DROP
+CANDIDATES. The multiplier now uses membership tests, so dicts and sets
+are both accepted; the docstring says so. Golden tests: set-form unit
+checks (same weights as dicts, drops unchanged) plus a live pin that
+the G8 section never renders the crash stub. Same run: the Garoppolo
+`[hold]` live pin is now conditional — a held player who is a
+projected starter has no clog line (clog lines cover bench only), so
+the tag asserts only when a line exists; the DROP-exclusion pins are
+the live guarantee in that case.
+
 ### K/DEF branch uses the keeper, not roster order (2026-11-16)
 
 The adjacent gap named above is now built: the K/DEF suggestion
