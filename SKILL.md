@@ -184,7 +184,9 @@ and a roster-clog audit (G8 — bench ranked by contingent value; handcuffs,
 hurt-starter backups, rising-usage players, last-game-role players (see
 G1 above), held players (see PROTECTED HOLDS above), and unpriced players (K/DEF,
 no value feed — unpriced is not droppable) are protected, never
-named as drops — with one exception (2026-11-15): a DUPLICATE K/DEF
+named as drops — the contingency inputs accept dicts or sets, so a
+rostered handcuff backup no longer crashes the audit (2026-11-22 WW
+case: Emmett Johnson behind Kenneth Walker III) — with one exception (2026-11-15): a DUPLICATE K/DEF
 behind a healthy, non-bye keeper (best FantasyPros ROS rank at the
 position) is dead weight and IS droppable, in both the audit's DROP
 CANDIDATES and the suggested ADD/DROP pairs; a lone K/DEF is never
