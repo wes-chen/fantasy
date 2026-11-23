@@ -215,6 +215,129 @@ finally:
 check("#20: draft-type K/DST page is REJECTED, never ranked as ROS",
       _kd_rejected)
 
+# ---------------- FP name-join collision key: team first (2026-11-23) ----
+# The 2026-11-21 Josh Johnson lesson, inside this repo's own join: the old
+# (active, search_rank) key resolved "josh johnson" to 8222 (teamless WR,
+# search_rank 446) over 260 (ARI QB, search_rank 544), so the real QB's
+# ECR/bye/tier attached to a player who never appears on any board surface
+# — the QB carried no FP signal at all. 9 collisions in the live DB
+# resolve to a teamless winner this way. Team presence now dominates.
+check("fp-collision: teamed beats teamless despite worse search_rank",
+      tb.fp_collision_key({"team": "ARI", "active": True, "search_rank": 544})
+      < tb.fp_collision_key({"team": None, "active": True,
+                            "search_rank": 446}))
+check("fp-collision: teamed inactive beats teamless active",
+      tb.fp_collision_key({"team": "ARI", "active": False,
+                          "search_rank": 9999999})
+      < tb.fp_collision_key({"team": None, "active": True, "search_rank": 1}))
+check("fp-collision: among teamed, active beats inactive, then search_rank",
+      tb.fp_collision_key({"team": "ARI", "active": True, "search_rank": 500})
+      < tb.fp_collision_key({"team": "ARI", "active": False, "search_rank": 1})
+      and tb.fp_collision_key({"team": "ARI", "active": True,
+                              "search_rank": 100})
+      < tb.fp_collision_key({"team": "ARI", "active": True,
+                            "search_rank": 200}))
+check("fp-collision: missing team/search_rank keys fail safe (teamless, last)",
+      tb.fp_collision_key({}) == (1, 1, 9999999))
+
+_JJ_PAGE = _fp_page(
+    "ros", "ROS PPR", "PPR", "11\\/23",
+    '{"player_name":"Josh Johnson","player_bye_week":"9",'
+    '"rank_ecr":120,"tier":5}')
+# Real Sleeper rows for the four Josh Johnsons (2026-11-21 lesson).
+_JJ_PLAYERS = {
+    "260": {"full_name": "Josh Johnson", "position": "QB", "team": "ARI",
+            "active": True, "search_rank": 544},
+    "8051": {"full_name": "Josh Johnson", "position": "RB", "team": None,
+             "active": True, "search_rank": 559},
+    "8222": {"full_name": "Josh Johnson", "position": "WR", "team": None,
+             "active": True, "search_rank": 446},
+    "1625": {"full_name": "Josh Johnson", "position": "CB", "team": None,
+             "active": False, "search_rank": 9999999},
+}
+_saved_jj_urlopen = _urlreq.urlopen
+_urlreq.urlopen = _fp_urlopen()
+try:
+    _fp_urlopen.page = _JJ_PAGE
+    _jj, _ = tb.get_fp_ecr(_JJ_PLAYERS, 1.0)
+    check("fp-collision: Josh Johnson ECR maps to the ARI QB (260), not "
+          "a teamless legacy entry",
+          _jj.get("260") == (9, 120, 5) and "8222" not in _jj
+          and "8051" not in _jj,
+          f"jj={_jj}")
+finally:
+    _fp_urlopen.page = _FP_ROS_PAGE
+    _urlreq.urlopen = _saved_jj_urlopen
+
+
+def _old_fp_key(p):
+    return (0 if p.get("active") else 1, p.get("search_rank") or 9999999)
+
+
+_old_jj_winner = min(_JJ_PLAYERS,
+                     key=lambda _pid: _old_fp_key(_JJ_PLAYERS[_pid]))
+check("fp-collision (negative control): the old (active, search_rank) "
+      "key resolves Josh Johnson to the teamless WR 8222",
+      _old_jj_winner == "8222", f"old winner={_old_jj_winner}")
+
+# Same shared helper must wire the K/DEF join too (position is synthetic
+# here — only the join wiring is under test).
+_KJ_K_HTML = ("var ecrData = {\"ranking_type_name\":\"ros\",\"last_updated\":"
+              "\"11\\/23\",\"players\":[{\"player_name\":\"Josh Johnson\","
+              "\"rank_ecr\":30,\"player_bye_week\":\"9\"}]};\n")
+_KJ_D_HTML = ("var ecrData = {\"ranking_type_name\":\"ros\",\"last_updated\":"
+              "\"11\\/23\",\"players\":[]};\n")
+
+
+class _kj_urlopen:
+    def __call__(self, req, *a, **k):
+        slug = req.full_url.rsplit("/", 1)[-1]
+        page = {"ros-k.php": _KJ_K_HTML, "ros-dst.php": _KJ_D_HTML}[slug]
+
+        class _Resp:
+            def read(self):
+                return page.encode()
+        return _Resp()
+
+
+_KJ_PLAYERS = {
+    "260": {"full_name": "Josh Johnson", "position": "K", "team": "ARI",
+            "active": True, "search_rank": 544},
+    "8222": {"full_name": "Josh Johnson", "position": "K", "team": None,
+             "active": True, "search_rank": 446},
+}
+_saved_kj_urlopen = _urlreq.urlopen
+_urlreq.urlopen = _kj_urlopen()
+try:
+    _kj = tb.get_fp_kdef(_KJ_PLAYERS)
+    check("fp-collision: K/DEF join maps a shared name to the teamed "
+          "entry, not the teamless one",
+          _kj.get("260") == (30, 9) and "8222" not in _kj, f"kj={_kj}")
+finally:
+    _urlreq.urlopen = _saved_kj_urlopen
+
+# Live-DB pin: across every duplicate name in the real players DB, the
+# collision key must never resolve to a teamless player while a teamed
+# alternative exists (the 9-case scan that motivated this fix).
+_pl_jj = json.load(open(os.path.expanduser("~/workspace/sleeper/players.json")))
+_byname_jj = {}
+for _pid_jj, _p_jj in _pl_jj.items():
+    if isinstance(_p_jj, dict) and _p_jj.get("full_name"):
+        _byname_jj.setdefault(tb.norm_name(_p_jj["full_name"]),
+                              []).append(_pid_jj)
+_jj_bad = []
+for _nm_jj, _pids_jj in _byname_jj.items():
+    if len(_pids_jj) < 2:
+        continue
+    _winner_jj = min(_pids_jj,
+                     key=lambda _pid: tb.fp_collision_key(_pl_jj[_pid]))
+    if (not _pl_jj[_winner_jj].get("team")
+            and any(_pl_jj[_pid].get("team") for _pid in _pids_jj)):
+        _jj_bad.append(_nm_jj)
+check("fp-collision: live DB — no shared name resolves to a teamless "
+      "player while a teamed alternative exists",
+      not _jj_bad, "; ".join(_jj_bad[:10]))
+
 check("#20: gate: top-12 unit 8+ ranks better suggests",
       tb.kdef_upgrade_suggests(2, 24) and tb.kdef_upgrade_suggests(12, 20))
 check("#20: gate: outside top-12 / gap too small / missing ranks don't",
