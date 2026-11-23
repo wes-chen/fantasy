@@ -1154,6 +1154,24 @@ def norm_name(n):
     n = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", n)
     return re.sub(r"\s+", " ", n).strip()
 
+def fp_collision_key(p):
+    """Sort key for the FantasyPros name-join on shared names.
+
+    Team first, then active, then search_rank: a player with an NFL
+    team is the one FantasyPros ranks, so he must win over a teamless
+    legacy entry even when the legacy entry is active with a better
+    search_rank. The old key (active, search_rank) got this wrong live:
+    "josh johnson" resolved to 8222 (teamless WR, search_rank 446) over
+    260 (ARI QB, search_rank 544) — the real QB's ECR/bye/tier silently
+    attached to a player who never appears on any board surface, so the
+    QB carried no FP signal at all (2026-11-21 Josh Johnson lesson;
+    9 collisions in the live DB resolve to a teamless winner this way).
+    """
+    return (0 if p.get("team") else 1,
+            0 if p.get("active") else 1,
+            p.get("search_rank") or 9999999)
+
+
 def get_fp_ecr(players, ppr):
     """FantasyPros rest-of-season ECR + bye weeks.
 
@@ -1188,14 +1206,11 @@ def get_fp_ecr(players, ppr):
             f"(ranking_type_name={d.get('ranking_type_name')!r}, "
             f"type={d.get('type')!r}) — refusing to label it ROS ECR")
     name2sid = {}
-    def _key(p):
-        # prefer active, fantasy-relevant players on name collisions
-        return (0 if p.get("active") else 1, p.get("search_rank") or 9999999)
     for pid, p in players.items():
         if isinstance(p, dict) and p.get("full_name"):
             k = norm_name(p["full_name"])
             cur = name2sid.get(k)
-            if cur is None or _key(p) < _key(players[cur]):
+            if cur is None or fp_collision_key(p) < fp_collision_key(players[cur]):
                 name2sid[k] = str(pid)
     fp = {}
     for pl in d.get("players") or []:
@@ -1230,9 +1245,6 @@ def get_fp_kdef(players):
            "AppleWebKit/537.36 (KHTML, like Gecko) "
            "Chrome/126.0 Safari/537.36")
     name2sid = {}
-    def _key(p):
-        # prefer active, fantasy-relevant players on name collisions
-        return (0 if p.get("active") else 1, p.get("search_rank") or 9999999)
     for pid, p in players.items():
         if not isinstance(p, dict) or p.get("position") not in ("K", "DEF"):
             continue
@@ -1243,7 +1255,7 @@ def get_fp_kdef(players):
             continue
         k = norm_name(nm)
         cur = name2sid.get(k)
-        if cur is None or _key(p) < _key(players[cur]):
+        if cur is None or fp_collision_key(p) < fp_collision_key(players[cur]):
             name2sid[k] = str(pid)
     out = {}
     for slug in ("ros-k.php", "ros-dst.php"):
