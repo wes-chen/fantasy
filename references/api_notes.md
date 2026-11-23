@@ -145,9 +145,13 @@ Notes (verified 2026-09-28):
   The engine rejects any non-`ros` page and degrades to "unavailable
   this run" rather than printing draft ranks as ROS ECR.
 - Join to Sleeper IDs on normalized names (lowercase, strip periods /
-  apostrophes / suffixes Jr/Sr/II/III/IV/V). On collisions prefer
-  `active` players with the lowest `search_rank` (e.g. "Kenneth Walker"
-  collides with a stale WR entry; the real one is the active KC RB).
+  apostrophes / suffixes Jr/Sr/II/III/IV/V). On collisions prefer a
+  player WITH an NFL team first, then `active`, then the lowest
+  `search_rank` (2026-11-23: the old active-first key resolved "Josh
+  Johnson" to a teamless legacy WR, search_rank 446, over the ARI QB,
+  search_rank 544 — the real player's ECR/bye/tier silently attached to
+  a player who never appears on any board surface; 9 collisions in the
+  live DB resolved that way).
 - Bye weeks power the engine's bye audit: clusters of 3+ on one bye are
   flagged, and swaps that stack onto a 2+ bye week get `[BYE-STACK]`.
 - `rank_ecr` vs FantasyCalc `overallRank`: |diff| >= 12 spots is flagged
