@@ -3491,19 +3491,34 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
     # board (the 2026-10-27 baseline failure: WW printed x0.7-1.3
     # while the pin still demanded x0.9-1.1).
     _wk = int(re.search(r"NFL Week (\d+) \|", out).group(1))
+    # Deadline-aware (2026-11-24): past the league's live trade
+    # deadline the swaps/2-for-1 sections print only the suppression
+    # note, so the swap-section legends below are absent by design —
+    # WW's deadline is Week 11, snapusa's Week 13 (both read off the
+    # printed live setting, never hardcoded). Without this the suite
+    # reds on a correct board the week each league's deadline passes.
+    _dl = int(re.search(r"trade deadline Week (\d+)", out).group(1))
+    _supp = tb.proposals_suppressed(_wk, _dl)
     _g1sec = out.split("=== USAGE-GAP RADAR (G1")[1].split(
         "=== CANDIDATE SWAPS")[0]
-    _g5expect = _wk >= 5 and "(unavailable this run" not in _g1sec
+    _g5expect = _wk >= 5 and "(unavailable this run" not in _g1sec \
+        and not _supp
+    # The roster legend prints in YOUR ROSTER whenever playoff weights
+    # are active — it is NOT gated by the deadline suppression, only
+    # the swap-section note above is.
+    _g5roster = _wk >= 5 and "(unavailable this run" not in _g1sec
     _g5wide = _wk >= 8 and tag == "weekend-warriors"
     _g5note = ("G5: deltas use playoff-weighted values (W15-17 SOS "
                + ("x0.7-1.3, E12 endgame ceiling mode" if _g5wide
                   else "x0.9-1.1") + ")")
     check(f"{tag}: G5 swap note gated (present iff Week>=5 with data)",
           (_g5note in out) == _g5expect,
-          f"week={_wk} expected={_g5expect} note={_g5note}")
+          f"week={_wk} deadline={_dl} suppressed={_supp} "
+          f"expected={_g5expect} note={_g5note}")
     check(f"{tag}: G5 roster legend gated with the weights",
           ("[P+]/[P-]: playoff-weeks (W15-17) schedule soft/brutal" in out)
-          == _g5expect)
+          == _g5roster,
+          f"week={_wk} roster-expected={_g5roster}")
     # G6: the section always prints a body (backup lines or a marked stub),
     # and a free backup is never printed without the UNPROTECTED flag.
     _g6sec = out.split(
@@ -3616,9 +3631,13 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           not _bad_drops, f"illegal drops: {_bad_drops}")
     # E6: fairness bands — legend in the swaps header, a band on every
     # swap gap tag, and the league's largest accepted gap as the live
-    # calibration in the trade history section.
+    # calibration in the trade history section. The legend lives in the
+    # swaps section, so it is absent (by design) once the deadline
+    # gate suppresses that section — gated on _supp above.
     check(f"{tag}: fairness band legend (E6)",
-          "10-20% FAIR" in out and "20-35% STRETCH" in out)
+          ("10-20% FAIR" in out and "20-35% STRETCH" in out)
+          == (not _supp),
+          f"week={_wk} deadline={_dl} suppressed={_supp}")
     _gaps = [ln for ln in out.splitlines()
              if re.search(r"\[gap (vs combined )?\d+%", ln)]
     _unbanded = [ln for ln in _gaps
@@ -3638,9 +3657,27 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
           not _swaps or len(_ranged) == len(_swaps),
           f"rangeless rows: {[ln for ln in _swaps if ln not in _ranged]}")
     check(f"{tag}: value-range legend under swaps header (E7)",
-          "value ranges: (point, lo-hi) from 30-day trend volatility" in out)
+          ("value ranges: (point, lo-hi) from 30-day trend volatility"
+           in out) == (not _supp),
+          f"week={_wk} deadline={_dl} suppressed={_supp}")
     check(f"{tag}: swaps header states the partner-fit rule",
-          "sent player must crack theirs" in out)
+          ("sent player must crack theirs" in out) == (not _supp),
+          f"week={_wk} deadline={_dl} suppressed={_supp}")
+    # Positive live pin for the suppressed branch (the fake-week e2e
+    # below covers it synthetically): a post-deadline swaps section is
+    # exactly the suppression note, header kept for the Tuesday parser.
+    if _supp:
+        try:
+            _sws = _section(
+                out,
+                "=== CANDIDATE SWAPS (sorted by lineup-points delta) ===")
+        except AssertionError:
+            _sws = None
+        check(f"{tag}: swaps section is only the suppression note "
+              f"post-deadline",
+              _sws == ["  (trade proposals suppressed — trade deadline "
+                       "passed; waivers only)"],
+              f"section: {_sws}")
     # Partner-fit mirror (2026-11-13): every 1-for-1 row prints the
     # partner's own lineup gain, and the gate requires it positive — a
     # row the partner would never accept can't print with a bare
@@ -4288,8 +4325,25 @@ _2tagged = [ln for ln in _2rows
 check("E3: every 2-for-1 row carries a positive [their lineup +N] tag",
       not _2rows or len(_2tagged) == len(_2rows),
       f"untagged rows: {[ln for ln in _2rows if ln not in _2tagged]}")
+# Deadline-aware (2026-11-24): past WW's Week 11 deadline the 2-for-1
+# section is only the suppression note, so the partner-fit line is
+# absent by design; the section-scoped pin below covers that branch.
+_ww_wk = int(re.search(r"NFL Week (\d+)", out_ww).group(1))
+_ww_dl = int(re.search(r"trade deadline Week (\d+)", out_ww).group(1))
+_ww_supp = tb.proposals_suppressed(_ww_wk, _ww_dl)
 check("E3: 2-for-1 header states the partner-fit rule",
-      "sent pieces must crack theirs" in out_ww)
+      ("sent pieces must crack theirs" in out_ww) == (not _ww_supp),
+      f"week={_ww_wk} deadline={_ww_dl} suppressed={_ww_supp}")
+if _ww_supp:
+    try:
+        _2s = _section(
+            out_ww, "=== 2-FOR-1 CONSOLIDATION (stars over depth) ===")
+    except AssertionError:
+        _2s = None
+    check("E3: 2-for-1 section is only the suppression note post-deadline",
+          _2s == ["  (trade proposals suppressed — trade deadline "
+                  "passed; waivers only)"],
+          f"section: {_2s}")
 _p2note = [ln for ln in out_ww.splitlines()
            if re.search(r"\(\d+ 2-for-1\(s\) dropped: package couldn't "
                        r"crack their projected starting lineup\)", ln)]
@@ -4750,11 +4804,16 @@ check("deadline gate: garbage input never suppresses",
       tb.proposals_suppressed(None, 11) is False
       and tb.proposals_suppressed("x", 11) is False)
 
-# Live pre-deadline pin: at the current week (<= deadline) neither board
-# carries the suppression note.
+# Live deadline pin (2026-11-24): the suppression note is present iff
+# the current week is past the league's live deadline — WW passed its
+# Week 11 deadline in Week 12 while snapusa (deadline 13) is still
+# open, so a blanket "no note on either board" reds on a correct board.
 for _lg12, _o12 in ((SNAPUSA, out_snap), (WW, out_ww)):
-    check(f"deadline gate: no suppression note pre-deadline {_lg12}",
-          "trade proposals suppressed" not in _o12)
+    _w12 = int(re.search(r"NFL Week (\d+)", _o12).group(1))
+    _d12 = int(re.search(r"trade deadline Week (\d+)", _o12).group(1))
+    check(f"deadline gate: suppression note matches live deadline {_lg12}",
+          ("trade proposals suppressed" in _o12) == (_w12 > _d12),
+          f"week={_w12} deadline={_d12}")
 
 # End-to-end post-deadline branch: in-process board runs with the Sleeper
 # state week faked past each league's own trade deadline (deadline+1 —
