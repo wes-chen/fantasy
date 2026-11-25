@@ -1230,8 +1230,128 @@ check("load_usage: last_week/last_touches/last_snap track the newest row",
       _shl["last_week"] == 6 and _shl["last_touches"] == 4.0
       and _shl["last_snap"] == 0.20 and _shl["games"] == 2
       and _shl["carries_pg"] == 8.5)
+# last_pts (2026-11-25 rising-role wire): PPR of the most recent game row
+# — W6: 12 rush yds (1.2) + 1 rec (1.0) + 8 rec yds (0.8) = 3.0, not the
+# W5 breakout (15.8). A stale last_pts would surface the wrong game.
+check("load_usage: last_pts is the most recent week's PPR, not the max",
+      _shl["last_pts"] == 3.0)
 os.unlink(_sp)
 os.unlink(_np)
+
+# Rising-role wire (2026-11-24 Ty Johnson lesson): a free agent whose last
+# game shows a live role (≥8 touches AND ≥8 PPR) must surface even when
+# his FantasyCalc value is ~zero — suggested ADDs only ever consider the
+# top-valued FA per position, so Johnson (9 touches, 12.7 PPR W11) was
+# invisible while Dobbins (1 touch, 0.1 PPR, snap 1%) was the top FA RB.
+# The snap branch alone is blocking-TE noise; the PPR floor keeps empty
+# touches (8 touches, 1.5 PPR) off the line.
+def _rr_u(pos, games, last_week, last_touches, last_snap, last_pts,
+          name, team):
+    return {"pos": pos, "games": games, "last_week": last_week,
+            "last_touches": last_touches, "last_snap": last_snap,
+            "last_pts": last_pts, "name": name, "team": team}
+
+_RR_ROWS = [
+    (("ty johnson", "BUF", "RB"),
+     _rr_u("RB", 11, 11, 9.0, 0.36, 12.7, "Ty Johnson", "BUF")),
+    (("jk dobbins", "DEN", "RB"),
+     _rr_u("RB", 10, 11, 1.0, 0.01, 0.1, "J.K. Dobbins", "DEN")),
+    (("simi fehoko", "ARI", "WR"),
+     _rr_u("WR", 8, 11, 8.0, 0.93, 1.5, "Simi Fehoko", "ARI")),
+    (("evan engram", "DEN", "TE"),
+     _rr_u("TE", 9, 11, 8.0, 0.45, 9.4, "Evan Engram", "DEN")),
+    (("boundary ppr", "X", "WR"),
+     _rr_u("WR", 6, 11, 9.0, 0.50, 8.0, "Boundary PPR", "X")),
+    (("low ppr", "X", "WR"),
+     _rr_u("WR", 6, 11, 9.0, 0.50, 7.9, "Low PPR", "X")),
+    (("snap only", "X", "TE"),
+     _rr_u("TE", 6, 11, 3.0, 0.59, 9.0, "Snap Only", "X")),
+    (("stale", "X", "RB"),
+     _rr_u("RB", 6, 9, 12.0, 0.60, 15.0, "Stale", "X")),
+    (("one game", "X", "TE"),
+     _rr_u("TE", 1, 11, 10.0, 0.60, 12.0, "One Game", "X")),
+    (("qb", "X", "QB"),
+     _rr_u("QB", 6, 11, 9.0, 0.50, 20.0, "QB", "X")),
+]
+_RR_USAGE = dict(_RR_ROWS)
+_RR_SID = {nk: str(1000 + i) for i, (nk, _) in enumerate(_RR_ROWS)}
+_RR_PLAYERS = {sid: {"team": "BUF", "injury_status": ""}
+               for sid in _RR_SID.values()}
+_RR_SID_OF = lambda nk: _RR_SID.get(nk)  # noqa: E731
+_RR_NAMES = lambda rows: [r["name"] for r in rows]  # noqa: E731
+_RR_BASE = lambda **kw: tb.rising_role_wire(  # noqa: E731
+    _RR_USAGE, 12, _RR_SID_OF, _RR_PLAYERS, set(), set(), set(), **kw)
+
+check("rising_role_wire: Johnson live case, ranked by last-game PPR",
+      _RR_NAMES(_RR_BASE()) == ["Ty Johnson", "Evan Engram", "Boundary PPR"])
+check("rising_role_wire: Dobbins collapse / empty touches / snap-only / "
+      "stale / one-game / QB all excluded",
+      not any(n in _RR_NAMES(_RR_BASE()) for n in
+              ["J.K. Dobbins", "Simi Fehoko", "Low PPR", "Snap Only",
+               "Stale", "One Game", "QB"]))
+check("rising_role_wire: PPR boundary is inclusive at 8.0",
+      "Boundary PPR" in _RR_NAMES(_RR_BASE()))
+check("rising_role_wire: top-4 FA at his position is already surfaced",
+      _RR_NAMES(tb.rising_role_wire(_RR_USAGE, 12, _RR_SID_OF, _RR_PLAYERS,
+                                    set(), set(), {"1000"}))
+      == ["Evan Engram", "Boundary PPR"])
+check("rising_role_wire: rostered player never surfaces",
+      _RR_NAMES(tb.rising_role_wire(_RR_USAGE, 12, _RR_SID_OF, _RR_PLAYERS,
+                                    {"1000"}, set(), set()))
+      == ["Evan Engram", "Boundary PPR"])
+check("rising_role_wire: pending-claim player never re-recommended",
+      _RR_NAMES(tb.rising_role_wire(_RR_USAGE, 12, _RR_SID_OF, _RR_PLAYERS,
+                                    set(), {"1000"}, set()))
+      == ["Evan Engram", "Boundary PPR"])
+_RR_OUT = dict(_RR_PLAYERS)
+_RR_OUT["1000"] = {"team": "BUF", "injury_status": "Out"}
+check("rising_role_wire: HURT veto mirrors G1 #28",
+      _RR_NAMES(tb.rising_role_wire(_RR_USAGE, 12, _RR_SID_OF, _RR_OUT,
+                                    set(), set(), set()))
+      == ["Evan Engram", "Boundary PPR"])
+_RR_TEAMLESS = dict(_RR_PLAYERS)
+_RR_TEAMLESS["1000"] = {"team": None, "injury_status": ""}
+check("rising_role_wire: teamless player never surfaces (Koo lesson)",
+      _RR_NAMES(tb.rising_role_wire(_RR_USAGE, 12, _RR_SID_OF, _RR_TEAMLESS,
+                                    set(), set(), set()))
+      == ["Evan Engram", "Boundary PPR"])
+_RR_USAGE4 = dict(_RR_USAGE)
+_RR_USAGE4[("fourth fa", "X", "WR")] = _rr_u(
+    "WR", 6, 11, 10.0, 0.50, 10.0, "Fourth FA", "X")
+_RR_SID4 = dict(_RR_SID)
+_RR_SID4[("fourth fa", "X", "WR")] = "2000"
+_RR_PLAYERS4 = dict(_RR_PLAYERS)
+_RR_PLAYERS4["2000"] = {"team": "X", "injury_status": ""}
+check("rising_role_wire: cap is 3, lowest last-game PPR drops out",
+      _RR_NAMES(tb.rising_role_wire(_RR_USAGE4, 12,
+                                    lambda nk: _RR_SID4.get(nk),
+                                    _RR_PLAYERS4, set(), set(), set()))
+      == ["Ty Johnson", "Fourth FA", "Evan Engram"])
+check("rising_role_wire: empty/None usage -> no rows, never a crash",
+      tb.rising_role_wire({}, 12, _RR_SID_OF, _RR_PLAYERS,
+                          set(), set(), set()) == []
+      and tb.rising_role_wire(None, 12, _RR_SID_OF, _RR_PLAYERS,
+                              set(), set(), set()) == [])
+_RR_NOPTS = dict(_RR_USAGE)
+_RR_NOPTS[("ty johnson", "BUF", "RB")] = {
+    k: v for k, v in _RR_NOPTS[("ty johnson", "BUF", "RB")].items()
+    if k != "last_pts"}
+check("rising_role_wire: row without last_pts fails the gate, never crashes",
+      "Ty Johnson" not in _RR_NAMES(
+          tb.rising_role_wire(_RR_NOPTS, 12, _RR_SID_OF, _RR_PLAYERS,
+                              set(), set(), set())))
+check("rising_role_wire: thresholds exposed as module constants",
+      tb.RISING_ROLE_TOUCHES == 8 and tb.RISING_ROLE_PPR == 8.0
+      and tb.RISING_ROLE_MAX == 3)
+# The call site must exclude the full top-4 shown per position, not just
+# the top-1: the first cut passed only [0] and the Nov 25 live pin caught
+# Ja'Kobi Lane (a top-4 FA WR) duplicating onto the line.
+check("rising_role_wire: one call site, excluding the top-4 shown per "
+      "position (def + 1 call site, [:4] slice)",
+      _src.count("rising_role_wire(") == 2
+      and "_top_fa_sids = {pid_s for _p in WPOS" in _src
+      and "for (_, _, _, pid_s) in fa_by_pos.get(_p, [])[:4]}" in _src,
+      f"count={_src.count('rising_role_wire(')}")
 
 # ---------------- NF-01: waiver priority cost model ----------------
 _fake_rosters = [
@@ -2794,6 +2914,95 @@ for league, tag in ((SNAPUSA, "snapusa"), (WW, "weekend-warriors")):
             _tl_bad.append(f"suggested ADD {_nm} has no NFL team")
     check(f"{tag}: no teamless player on waiver surfaces (Koo lesson)",
           not _tl_bad, "; ".join(_tl_bad))
+    # Rising-role wire (2026-11-24 Ty Johnson lesson): any name on the
+    # line must be a free agent in this league with an NFL team, a live
+    # last-game role (≥8 touches and ≥8 PPR in the last 2 weeks per
+    # nflverse), and not already a top-4 FA at his position. Guarded:
+    # the line only prints when a free agent qualifies, so an empty week
+    # is vacuous, not a failure; an nflverse-cache miss SKIPs the
+    # recompute rather than failing on a degraded run.
+    _rr_ln = next((ln for ln in out.splitlines()
+                   if ln.startswith("  rising role (")), None)
+    if _rr_ln is None:
+        print(f"  (rising-role live pin {tag}: no qualifying FA — vacuous)")
+    else:
+        try:
+            _wk_mrr = re.search(r"NFL Week (\d+)", out)
+            _wk_rr = int(_wk_mrr.group(1)) if _wk_mrr else None
+            if _wk_rr is None:
+                raise ValueError("no NFL week in board header")
+            _pl_rr = json.load(open(os.path.expanduser(
+                "~/workspace/sleeper/players.json")))
+            # Name-only reverse map collides (Antonio Williams: WR WAS
+            # 13301 vs RB teamless 7203 — the Nov 23 Josh Johnson class),
+            # so resolve exactly like the board's sid_of_nkey: the nkey
+            # (norm name, team, pos) first, then the team-agnostic
+            # (name, pos) fallback — nflverse says LA, Sleeper says LAR,
+            # so Ronnie Rivers / Blake Corum only resolve via fallback.
+            _nk2sid_rr = {}
+            for _sid_rr, _p_rr in _pl_rr.items():
+                if isinstance(_p_rr, dict) and _p_rr.get("full_name"):
+                    _nk2sid_rr[(tb.norm_name(_p_rr["full_name"]),
+                                _p_rr.get("team"),
+                                _p_rr.get("position"))] = str(_sid_rr)
+            _bynp_rr = {}
+            for _nk_rr, _sid_rr in _nk2sid_rr.items():
+                _bynp_rr.setdefault((_nk_rr[0], _nk_rr[2]), _sid_rr)
+            _ros_rr = tb.get(
+                f"https://api.sleeper.app/v1/league/{league}/rosters")
+            _rost_rr = {str(p) for _r in _ros_rr
+                        for p in (_r.get("players") or [])
+                        + (_r.get("reserve") or [])}
+            _top_rr = {}
+            for _ln_rr in out.splitlines():
+                _m_rr = re.match(r"  top FA ([A-Z]+): (.*)", _ln_rr)
+                if _m_rr:
+                    _top_rr[_m_rr.group(1)] = {
+                        _e.split("(")[0].strip()
+                        for _e in _m_rr.group(2).split(", ")}
+            _nvp_rr = fi.nflverse_paths(keys=("stats", "snaps"))
+            _usg_rr = fi.load_usage(_nvp_rr["stats"], _nvp_rr["snaps"])
+            _bad_rr = []
+            for _e_rr in _rr_ln.split("priced in): ", 1)[1].split("; "):
+                _m_rr = re.match(
+                    r"^(.+?) \(([A-Z]+),([A-Z]+)\) (\d+) touches, "
+                    r"([\d.]+) PPR W(\d+)", _e_rr)
+                if not _m_rr:
+                    _bad_rr.append(f"unparsable entry: {_e_rr[:60]}")
+                    continue
+                _nm, _pos, _tm, _tc, _pp, _wk = _m_rr.groups()
+                _sid_rr = (_nk2sid_rr.get((tb.norm_name(_nm), _tm, _pos))
+                           or _bynp_rr.get((tb.norm_name(_nm), _pos)))
+                if not _sid_rr:
+                    _bad_rr.append(f"{_nm}: no Sleeper id")
+                    continue
+                if _sid_rr in _rost_rr:
+                    _bad_rr.append(f"{_nm}: rostered, not a free agent")
+                if not (_pl_rr.get(_sid_rr) or {}).get("team"):
+                    _bad_rr.append(f"{_nm}: no NFL team")
+                if ((_pl_rr.get(_sid_rr) or {}).get("injury_status") or "") \
+                        in ("Out", "IR", "Doubtful", "Suspended"):
+                    _bad_rr.append(f"{_nm}: injured, veto should apply")
+                if _nm in _top_rr.get(_pos, set()):
+                    _bad_rr.append(f"{_nm}: already a top-4 FA {_pos}")
+                _nk_rr = (tb.norm_name(_nm), _tm, _pos)
+                _u_rr = _usg_rr.get(_nk_rr)
+                if _u_rr is None:
+                    _bad_rr.append(f"{_nm}: no nflverse usage row")
+                    continue
+                if (_u_rr.get("last_touches") or 0) < 8:
+                    _bad_rr.append(f"{_nm}: last touches "
+                                   f"{_u_rr.get('last_touches')}")
+                if (_u_rr.get("last_pts") or 0) < 8.0:
+                    _bad_rr.append(f"{_nm}: last PPR "
+                                   f"{_u_rr.get('last_pts')}")
+                if (_u_rr.get("last_week") or 0) < _wk_rr - 2:
+                    _bad_rr.append(f"{_nm}: last week "
+                                   f"{_u_rr.get('last_week')}")
+            check(f"{tag}: rising-role line names only qualifying free agents",
+                  not _bad_rr, "; ".join(_bad_rr))
+        except Exception as _e_rr:  # noqa: BLE001 - guarded live check: SKIP
+            print(f"  SKIP rising-role live pin ({tag}): {_e_rr}")
     # #29: YOUR ROSTER prints K and DEF lines (a rostered DEF must never
     # read as missing), and a DEF never renders as a bare "SF"-style
     # abbrev — that readout surfaced as "DEF: empty" in chat 2026-10-06.
