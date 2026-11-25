@@ -661,3 +661,60 @@ call site, `_prot` union, clog-audit union), live pins per league
 CANDIDATES, ww silent on a snapusa-scoped row), and a fixture-swap that
 holds the live DROP CANDIDATE and asserts he leaves DROP CANDIDATES and
 renders HOLDING, then restores the registry byte-identical.
+
+## Rising-role wire (2026-11-25)
+
+Nov 24, Wesley asked whether any RB was rising on the wire or if Week 13
+had to come via trade. The chat scan said the wire was dry — and was
+wrong: Ty Johnson (BUF passing-down back, 1 carry + 7 catches on 8
+targets for 55 yds = 12.7 PPR W11, season-high snaps) was a free agent
+the whole time. Root cause, two layers: (1) the ad-hoc scan used Sleeper
+matchup `players_points`, which omits free agents never rostered in the
+league; (2) the board itself had no breakout signal on the waiver
+surface — suggested ADDs only ever consider the top-valued FA per
+position, and the G1 WIRE line only catches usage-vs-output gaps
+(buy-low), not a role breakout. Johnson's FantasyCalc value was ~0, so
+he was invisible while the board suggested Dobbins, whose snap share
+had collapsed 36% -> 1% (the Dobbins half — a snap-cliff avoid on
+suggested ADDs — is still unbuilt; see next candidate below).
+
+Fix: `fi.load_usage()` now records `last_pts` (PPR of the most recent
+stats week, alongside `last_touches`/`last_snap`), and
+`tb.rising_role_wire(usage, nfl_week, sid_of, players, rostered, claims,
+top_fa_sids)` selects free agents (RB/WR/TE) whose last game, within 2
+weeks, shows >= 8 touches AND >= 8 PPR, ranked by last-game PPR, capped
+at 3. It is the breakout half of the recent-role shield: same window and
+games floor, but the touches branch only — the snap branch alone is
+blocking-TE noise (1 touch, 59% snaps) — plus the PPR floor, so empty
+touches (8 touches, 1.5 PPR) don't surface. Exclusions mirror the other
+waiver surfaces: rostered, pending-claim, top-4 FA at his position
+(already surfaced above), no NFL team (Koo lesson), HURT (G1 #28 veto).
+Missing `last_pts` (rows built before the field existed) reads as 0 and
+fails the gate — never a crash, never a guess. The board prints one
+`rising role (...)` line in the WAIVER WIRE section with last-game
+touches + PPR, the FC value, and the acquisition-path tag — line only,
+never a suggested move, never a veto. Degrades to no line when the
+nflverse fetch fails.
+
+Golden tests: `load_usage` fixture pin (`last_pts` is the newest week's
+PPR, 3.0, not the W5 breakout 15.8); selector unit checks (Johnson live
+case ranked by last-game PPR; Dobbins collapse / empty touches /
+snap-only / stale / one-game / QB excluded; PPR boundary inclusive at
+8.0; top-FA / rostered / claimed / HURT / teamless exclusions; cap of 3;
+empty/None usage; missing `last_pts`); live pins per league (every name
+on the line is a free agent with a team, passes the HURT veto, is not a
+top-4 FA, and recomputes to >= 8 touches and >= 8 PPR in the last 2
+weeks from nflverse — vacuous when no free agent qualifies).
+
+Live effect, Nov 25: snapusa prints Evan Engram (TE, DEN — 8 touches,
+13.4 PPR W11, FC 0), Tai Felton (WR, MIN — 12 touches, 10.2 PPR W11,
+FC 0), and Ronnie Rivers (RB, LA — 15 touches, 8.1 PPR W10, FC 0); the
+4-team board prints Jack Bech (9 touches, 22.8 PPR W11), Antonio
+Williams (11 touches, 21.2 PPR W11), and Blake Corum (21 touches, 20.9
+PPR W10). The first cut excluded only the top-1 FA per position, and the
+live pin caught the duplication — Ja'Kobi Lane (top-4 FA WR on snapusa),
+Jeanty and Moore (top-4 FAs on the 4-team board) were on both lines;
+the call site now excludes the full top-4 shown. Near-misses the gates
+correctly hold out: Fehoko (8 touches, 7.9 PPR — just under the floor),
+Ekeler (10 touches, 6.4 PPR), Estime (8 touches, 2.1 PPR, Out), Vele
+(7 touches despite 14.6 PPR).
