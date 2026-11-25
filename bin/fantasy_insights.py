@@ -177,7 +177,7 @@ def load_usage(stats_gz, snaps_csv):
             "carries": 0.0, "tds": 0.0, "pts": 0.0, "rec_yards": 0.0,
             "air_yards": 0.0, "snap_sum": 0.0, "snap_n": 0, "week": 0,
             "team": "", "name": "", "pos": "", "last_week": 0,
-            "last_touches": 0.0, "last_snap": 0.0})
+            "last_touches": 0.0, "last_snap": 0.0, "last_pts": 0.0})
 
     def num(v):
         try:
@@ -216,6 +216,7 @@ def load_usage(stats_gz, snaps_csv):
             if wk >= a["last_week"]:
                 a["last_week"] = wk
                 a["last_touches"] = num(r.get("carries")) + num(r.get("targets"))
+                a["last_pts"] = ppr_points(r)
             a["name"] = r.get("player_display_name") or a["name"]
             a["pos"] = pos
     with open(snaps_csv) as fh:
@@ -256,6 +257,7 @@ def load_usage(stats_gz, snaps_csv):
             "last_week": a["last_week"],
             "last_touches": a["last_touches"],
             "last_snap": round(a["last_snap"], 2),
+            "last_pts": round(a["last_pts"], 1),
         }
     return out
 
