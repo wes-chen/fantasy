@@ -622,6 +622,66 @@ def creates_coverage_gap(add_pos, drop, bypos, base_slots, flex_slots,
                   - set(cur_gap_poses or ()))
 
 
+# Rising-role wire signal (2026-11-24 Ty Johnson lesson): a free agent
+# whose last game shows a live role but whose FantasyCalc value is ~zero
+# never surfaces as a suggested ADD — the engine only ever considers the
+# top-valued FA per position — and the G1 WIRE line only catches
+# usage-vs-output gaps (buy-low), not a role breakout. Johnson (BUF
+# passing-down back: 9 touches, 12.7 PPR W11, season-high snaps) was
+# invisible to the board while it suggested Dobbins, whose snap share had
+# collapsed to 1%. This selector is the breakout half of the recent-role
+# shield: same last-game window, but the touches branch only (the snap
+# branch alone is blocking-TE noise on the wire) plus a last-game PPR
+# floor, so empty touches (8 touches, 1.5 PPR) don't surface. The HURT
+# veto mirrors G1 #28. Prints a line only — never a suggested move.
+RISING_ROLE_TOUCHES = 8
+RISING_ROLE_PPR = 8.0
+RISING_ROLE_MAX = 3
+
+
+def rising_role_wire(usage, nfl_week, sid_of, players, rostered, claims,
+                     top_fa_sids):
+    """Free agents with a live last-game role, ranked by last-game PPR.
+
+    usage: fi.load_usage() rows keyed by nkey; sid_of maps nkey -> Sleeper
+    id; players is the Sleeper players DB; rostered/claims/top_fa_sids
+    are str-sid sets (claimed players are never re-recommended; a
+    top-4 FA at his position is already surfaced, so listing him again
+    adds noise). Returns up to RISING_ROLE_MAX dicts, best last-game
+    PPR first. Missing last_pts (rows built before the field existed)
+    reads as 0 and fails the PPR gate — never a crash, never a guess.
+    """
+    rows = []
+    for nkey, u in (usage or {}).items():
+        if u.get("pos") not in ("RB", "WR", "TE"):
+            continue
+        if (u.get("games") or 0) < fi.G1_MIN_GAMES:
+            continue
+        if (u.get("last_week") or 0) < nfl_week - fi.RECENT_ROLE_WEEKS_AGO:
+            continue
+        if (u.get("last_touches") or 0) < RISING_ROLE_TOUCHES:
+            continue
+        if (u.get("last_pts") or 0) < RISING_ROLE_PPR:
+            continue
+        sid = sid_of(nkey)
+        if not sid:
+            continue
+        sid = str(sid)
+        if sid in rostered or sid in claims or sid in top_fa_sids:
+            continue
+        p = players.get(sid, {}) or {}
+        if not p.get("team"):
+            continue
+        if (p.get("injury_status") or "") in HURT:
+            continue
+        rows.append({"sid": sid, "name": u["name"], "pos": u["pos"],
+                     "team": u["team"], "last_week": u["last_week"],
+                     "last_touches": u["last_touches"],
+                     "last_pts": u["last_pts"]})
+    rows.sort(key=lambda r: (-r["last_pts"], -r["last_touches"], r["name"]))
+    return rows[:RISING_ROLE_MAX]
+
+
 def ir_capacity(reserve_slots, reserve_count):
     """IR-slot accounting (E13): returns (slots, open).
 
@@ -2619,6 +2679,31 @@ def main():
         top = ", ".join(_fa_fmt(v, n, inj, pid_s)
                         for v, n, inj, pid_s in fa_by_pos[pos][:4])
         print(f"  top FA {pos}: {top or '(none)'}")
+    # Rising-role wire (2026-11-24 Ty Johnson lesson): free agents whose
+    # last game shows a live role the value feeds haven't priced in.
+    # Line only — never a suggested move, never a veto. The top-4 FAs at
+    # each position are already surfaced above, so they are excluded
+    # here (top-1 only was the first cut — the Nov 25 live pin caught
+    # Ja'Kobi Lane, a top-4 FA WR, duplicating onto the line).
+    _top_fa_sids = {pid_s for _p in WPOS
+                    for (_, _, _, pid_s) in fa_by_pos.get(_p, [])[:4]}
+    _rising = rising_role_wire(nfl_usage, nfl_week, sid_of_nkey, players,
+                               rostered, claims, _top_fa_sids)
+    if _rising:
+        def _rr_fmt(r):
+            _v = fval.get(r["sid"], (0, 999, 999, 0, False))[0]
+            _inj = ((players.get(r["sid"], {}) or {})
+                    .get("injury_status") or "")
+            return (f"{r['name']} ({r['pos']},{r['team']}) "
+                    f"{r['last_touches']:.0f} touches, "
+                    f"{r['last_pts']:.1f} PPR W{r['last_week']} — "
+                    f"FC {fstr(r['sid'], _v)}"
+                    + (f"[!{_inj}]" if _inj else "")
+                    + _pathtag(_path(r["sid"]), r["sid"])
+                    + ptag_of(r["sid"]))
+        print("  rising role (last game ≥8 touches and ≥8 PPR — role the "
+              "value feeds haven't priced in): "
+              + "; ".join(_rr_fmt(r) for r in _rising))
     # G3: trending velocity — exactly ONE Sleeper call per scan; velocity
     # is derived from our own timestamped snapshot history (this scan's
     # 24h adds vs adds over the gap since the previous scan).
