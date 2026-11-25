@@ -115,7 +115,13 @@ players with no NFL team in Sleeper (team None — Younghoe Koo, cut
 2026-06-03, still `active`) never appear on any waiver surface: no team
 means no fantasy points, so they are excluded from the top-FA lines, the
 suggested ADDs, and the IR stash hunt — the Nov 10 board recommended Koo
-as a K add before this filter)
+as a K add before this filter), plus a rising-role line (2026-11-25 —
+free agents whose last game shows a live role, ≥8 touches and ≥8 PPR,
+that the value feeds haven't priced in yet; the Nov 24 Ty Johnson
+lesson — 9 touches, 12.7 PPR W11, invisible to the value-ranked waiver
+surface while it suggested Dobbins, whose snap share had collapsed to
+1%; line only, never a suggested move; top-4 FAs, injured, claimed, and
+teamless players are excluded)
 and the suggestion engine streams only decisive upgrades: a top-12 ROS
 unit 8+ ranks better than his current one — "current" is the keeper,
 the best-ranked unit on the roster, not whichever unit is listed first
